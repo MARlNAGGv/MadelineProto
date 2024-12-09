@@ -320,22 +320,26 @@ trait Files
         };
         $resPromises = [];
         $start = microtime(true);
+        /** @var ?FloodPremiumWaitError */
+        $floodWaitError = null;
         while ($part_num < $part_total_num || !$size) {
             if ($seekable) {
-                $writeCb = function () use ($method, $callable, $part_num, $cancellation, &$datacenter): WrappedFuture {
+                $writeCb = function () use ($method, $callable, $part_num, $cancellation, &$datacenter, &$floodWaitError): WrappedFuture {
+                    $floodWaitError?->wait($cancellation);
                     return $this->methodCallAsyncWrite(
                         $method,
-                        $callable($part_num) + ['cancellation' => $cancellation],
+                        $callable($part_num) + ['cancellation' => $cancellation, 'floodWaitLimit' => 0],
                         $datacenter
                     );
                 };
             } else {
                 try {
-                    $part = $callable($part_num) + ['cancellation' => $cancellation];
+                    $part = $callable($part_num) + ['cancellation' => $cancellation, 'floodWaitLimit' => 0];
                 } catch (StreamEof) {
                     break;
                 }
-                $writeCb = function () use ($method, $part, &$datacenter): WrappedFuture {
+                $writeCb = function () use ($method, $part, &$datacenter, &$floodWaitError, $cancellation): WrappedFuture {
+                    $floodWaitError?->wait($cancellation);
                     return $this->methodCallAsyncWrite(
                         $method,
                         $part,
@@ -344,11 +348,11 @@ trait Files
                 };
             }
             $writePromise = async($writeCb);
-            EventLoop::queue(function () use ($writePromise, $cb, $part_num, $size, &$resPromises, $cancellation, $writeCb, &$datacenter): void {
+            EventLoop::queue(function () use ($writePromise, $cb, $part_num, $size, &$resPromises, $cancellation, $writeCb, &$datacenter, &$floodWaitError): void {
+                $d = new DeferredFuture;
+                $resPromises[] = $d->getFuture();
                 do {
                     $readFuture = $writePromise->await($cancellation);
-                    $d = new DeferredFuture;
-                    $resPromises[] = $d->getFuture();
                     try {
                         // Wrote chunk!
                         if (!$readFuture->await($cancellation)) {
@@ -361,11 +365,9 @@ trait Files
                         $d->complete();
                         return;
                     } catch (FloodPremiumWaitError $e) {
-                        $this->logger("Got {$e->rpc} while uploading $part_num: {$datacenter}, retrying...");
-                        $writePromise = async(static function () use ($cancellation, $e, $writeCb): void {
-                            $e->wait($cancellation);
-                            $writeCb();
-                        });
+                        $this->logger("Got {$e->rpc} while uploading $part_num: {$datacenter}, waiting and retrying...");
+                        $floodWaitError = $e;
+                        $writePromise = async($writeCb);
                     } catch (FileRedirect $e) {
                         $datacenter = $e->dc;
                         $this->logger("Got redirect while uploading $part_num: {$datacenter}");
@@ -393,6 +395,9 @@ trait Files
         }
         await($promises, $cancellation);
         await($resPromises, $cancellation);
+        if ($totalSize === 0) {
+            throw new AssertionError('You uploaded an empty file!');
+        }
         $time = microtime(true) - $start;
         $speed = (int) ($totalSize * 8 / $time) / 1000000;
         if (!$size) {

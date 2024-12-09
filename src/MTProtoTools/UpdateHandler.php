@@ -50,6 +50,8 @@ use danog\MadelineProto\EventHandler\InlineQuery;
 use danog\MadelineProto\EventHandler\Message;
 use danog\MadelineProto\EventHandler\Message\ChannelMessage;
 use danog\MadelineProto\EventHandler\Message\CommentReply;
+use danog\MadelineProto\EventHandler\Message\Entities\MessageEntity;
+use danog\MadelineProto\EventHandler\Message\Entities\TextWithEntities;
 use danog\MadelineProto\EventHandler\Message\GroupMessage;
 use danog\MadelineProto\EventHandler\Message\PrivateMessage;
 use danog\MadelineProto\EventHandler\Message\SecretMessage;
@@ -80,11 +82,14 @@ use danog\MadelineProto\EventHandler\Message\Service\DialogScreenshotTaken;
 use danog\MadelineProto\EventHandler\Message\Service\DialogSetChatTheme;
 use danog\MadelineProto\EventHandler\Message\Service\DialogSetChatWallPaper;
 use danog\MadelineProto\EventHandler\Message\Service\DialogSetTTL;
+use danog\MadelineProto\EventHandler\Message\Service\DialogStarGift;
 use danog\MadelineProto\EventHandler\Message\Service\DialogSuggestProfilePhoto;
 use danog\MadelineProto\EventHandler\Message\Service\DialogTitleChanged;
 use danog\MadelineProto\EventHandler\Message\Service\DialogTopicCreated;
 use danog\MadelineProto\EventHandler\Message\Service\DialogTopicEdited;
 use danog\MadelineProto\EventHandler\Message\Service\DialogWebView;
+use danog\MadelineProto\EventHandler\Payments\Payment;
+use danog\MadelineProto\EventHandler\Payments\StarGift;
 use danog\MadelineProto\EventHandler\Pinned;
 use danog\MadelineProto\EventHandler\Pinned\PinnedChannelMessages;
 use danog\MadelineProto\EventHandler\Pinned\PinnedGroupMessages;
@@ -128,6 +133,7 @@ use danog\MadelineProto\TL\Types\Button;
 use danog\MadelineProto\UpdateHandlerType;
 use danog\MadelineProto\VoIP\DiscardReason;
 use danog\MadelineProto\VoIPController;
+use DialogGiftStars;
 use Revolt\EventLoop;
 use SplQueue;
 use Throwable;
@@ -490,6 +496,7 @@ trait UpdateHandler
                 'updatePendingJoinRequests'     => new PendingJoinRequests($this, $update),
                 'updateBotChatInviteRequester'  => new BotChatInviteRequest($this, $update),
                 'updateBotCommands'             => new BotCommands($this, $update),
+                'updateBotPrecheckoutQuery'     => new Payment($this, $update),
                 default => null
             };
         } catch (\Throwable $e) {
@@ -683,6 +690,37 @@ trait UpdateHandler
                     $info,
                     $message['action']['text'],
                     null
+                ),
+                'messageActionGiftStars' => new DialogGiftStars(
+                    $this,
+                    $message,
+                    $info,
+                    $message['action']['currency'],
+                    $message['action']['amount'],
+                    $message['action']['stars'],
+                    $message['action']['crypto_currency'] ?? null,
+                    $message['action']['crypto_amount'] ?? null,
+                    $message['action']['transaction_id'],
+                ),
+                'messageActionStarGift' => new DialogStarGift(
+                    $this,
+                    $message,
+                    $info,
+                    $message['action']['name_hidden'] ?? null,
+                    $message['action']['saved'] ?? null,
+                    $message['action']['converted'] ?? null,
+                    new StarGift(
+                        $this,
+                        $message['action']['gift']
+                    ),
+                    isset($message['action']['message']) ? new TextWithEntities(
+                        $message['action']['message']['text'],
+                        MessageEntity::fromRawEntities($message['action']['message']['entities']),
+                        isset($message['action']['message']['parse_mode']) ?
+                            ParseMode::from($message['action']['message']['parse_mode'])
+                            : null
+                    ) : null,
+                    $message['action']['convert_stars'],
                 ),
                 'messageActionGiftPremium' => new DialogGiftPremium(
                     $this,

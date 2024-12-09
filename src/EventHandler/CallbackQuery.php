@@ -40,13 +40,13 @@ abstract class CallbackQuery extends Update
     }
 
     /**
-     * @param string      $message   Popup to show
+     * @param ?string     $message   Popup to show
      * @param bool        $alert     Whether to show the message as a popup instead of a toast notification
      * @param string|null $url       URL to open
      * @param int         $cacheTime Cache validity (default set to 5 min based on telegram official docs ...)
      */
     public function answer(
-        string  $message,
+        ?string  $message = null,
         bool    $alert = false,
         ?string $url = null,
         int     $cacheTime = 5 * 60
