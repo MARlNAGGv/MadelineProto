@@ -135,7 +135,6 @@ trait ResponseHandler
     }
     private function handleNewSession(MTProtoIncomingMessage $message): void
     {
-        $message->ack();
         $this->shared->getTempAuthKey()->setServerSalt($message->read()['server_salt']);
         if ($this->API->authorized === \danog\MadelineProto\API::LOGGED_IN
             && isset($this->API->updaters[UpdateLoop::GENERIC])
@@ -162,7 +161,6 @@ trait ResponseHandler
     }
     private function handleMsgCopy(MTProtoIncomingMessage $message): void
     {
-        $message->ack();
         $content = $message->read();
         $referencedMsgId = $content['msg_id'];
         if (isset($this->incoming_messages[$referencedMsgId])) {
@@ -187,7 +185,6 @@ trait ResponseHandler
             if ($message->unencrypted) {
                 throw new SecurityException("Can't accept unencrypted result!");
             }
-            $message->ack();
             $response = $response['result'];
         }
         if (!isset($this->outgoing_messages[$requestId])) {

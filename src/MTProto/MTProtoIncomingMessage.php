@@ -147,6 +147,7 @@ final class MTProtoIncomingMessage extends MTProtoMessage
      */
     public function read(): array
     {
+        $this->ack();
         $this->state |= self::STATE_READ;
         $content = $this->content;
         $this->content = ['_' => $content['_']];

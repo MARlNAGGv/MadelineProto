@@ -120,7 +120,6 @@ final class ReadLoop extends Loop
             return self::STOP;
         }
         $this->connection->httpReceived();
-        $this->connection->wakeupHandler();
         return self::CONTINUE;
     }
     public function readMessage(): ?int
@@ -251,8 +250,7 @@ final class ReadLoop extends Loop
                 $message->setSeqNo($seq_no);
             }
 
-            $this->connection->new_incoming->enqueue($message);
-            $this->connection->incoming_messages[$message_id] = $message;
+            $this->connection->wakeupHandler($message);
             $this->connection->incomingCtr?->inc();
         } finally {
             $this->connection->reading(false);

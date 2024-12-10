@@ -31,6 +31,7 @@ use danog\MadelineProto\Loop\Connection\CleanupLoop;
 use danog\MadelineProto\Loop\Connection\HttpWaitLoop;
 use danog\MadelineProto\Loop\Connection\ReadLoop;
 use danog\MadelineProto\Loop\Connection\WriteLoop;
+use danog\MadelineProto\MTProto\MTProtoIncomingMessage;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\MTProtoSession\Session;
 use danog\MadelineProto\Stream\BufferedStreamInterface;
@@ -307,8 +308,9 @@ final class Connection
             EventLoop::queue($lock->release(...));
         }
     }
-    public function wakeupHandler(): void
+    public function wakeupHandler(MTProtoIncomingMessage $message): void
     {
+        $this->new_incoming->enqueue($message);
         \assert($this->handler !== null);
         Assert::true($this->handler->resume() || $this->handler->isRunning(), "Could not resume handler!");
     }
