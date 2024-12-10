@@ -57,7 +57,7 @@ trait Session
      *
      * @var array<MTProtoIncomingMessage>
      */
-    public array $incoming_messages = [];
+    //public array $incoming_messages = [];
     /**
      * Outgoing message array.
      *
@@ -155,24 +155,6 @@ trait Session
      */
     public function cleanupSession(): void
     {
-        $count = 0;
-        $incoming = [];
-        foreach ($this->incoming_messages as $key => $message) {
-            if ($message->canGarbageCollect()) {
-                $this->API->logger("Collecting incoming $message in DC {$this->datacenter}", Logger::VERBOSE);
-
-                $count++;
-            } else {
-                $this->API->logger("Can't garbage collect $message in DC {$this->datacenter}, not handled yet!", Logger::VERBOSE);
-                $incoming[$key] = $message;
-            }
-        }
-        $this->incoming_messages = $incoming;
-        $total = \count($this->incoming_messages);
-        if ($count+$total) {
-            $this->API->logger("Garbage collected $count incoming messages in DC {$this->datacenter}, $total left", Logger::VERBOSE);
-        }
-
         $count = 0;
         $outgoing = [];
         foreach ($this->outgoing_messages as $key => $message) {

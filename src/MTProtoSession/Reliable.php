@@ -36,11 +36,11 @@ trait Reliable
      */
     public function onNewMsgDetailedInfo(array $content): void
     {
-        if (isset($this->incoming_messages[$content['answer_msg_id']])) {
+        /*if (isset($this->incoming_messages[$content['answer_msg_id']])) {
             $this->incoming_messages[$content['answer_msg_id']]->ack();
         } else {
             EventLoop::queue($this->objectCall(...), 'msg_resend_req', ['msg_ids' => [$content['answer_msg_id']]]);
-        }
+        }*/
     }
     /**
      * Called when receiving a msg_detailed_info.
@@ -58,7 +58,7 @@ trait Reliable
     {
         $ok = true;
         foreach ($content['msg_ids'] as $msg_id) {
-            if (!isset($this->outgoing_messages[$msg_id]) || isset($this->incoming_messages[$msg_id])) {
+            if (!isset($this->outgoing_messages[$msg_id])) {
                 $ok = false;
             }
         }
@@ -104,7 +104,7 @@ trait Reliable
      */
     public function sendMsgsStateInfo(array $msg_ids, int $req_msg_id): void
     {
-        $this->API->logger('Sending state info for '.\count($msg_ids).' message IDs');
+        /*$this->API->logger('Sending state info for '.\count($msg_ids).' message IDs');
         $info = '';
         foreach ($msg_ids as $msg_id) {
             $cur_info = 0;
@@ -126,6 +126,6 @@ trait Reliable
             }
             $info .= \chr($cur_info);
         }
-        EventLoop::queue($this->objectCall(...), 'msgs_state_info', ['req_msg_id' => $req_msg_id, 'info' => $info]);
+        EventLoop::queue($this->objectCall(...), 'msgs_state_info', ['req_msg_id' => $req_msg_id, 'info' => $info]);*/
     }
 }

@@ -128,9 +128,4 @@ abstract class MTProtoMessage
 
         return $this;
     }
-
-    /**
-     * Check whether this message can be garbage collected.
-     */
-    abstract public function canGarbageCollect(): bool;
 }

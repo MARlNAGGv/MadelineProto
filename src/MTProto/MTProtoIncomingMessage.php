@@ -136,7 +136,6 @@ final class MTProtoIncomingMessage extends MTProtoMessage
      */
     public function ack(): void
     {
-        unset($this->connection->incoming_messages[$this->msgId]);
         $this->state |= self::STATE_ACKED;
         if ($this->contentRelated) {
             // I let the server know that I received its message
@@ -153,14 +152,6 @@ final class MTProtoIncomingMessage extends MTProtoMessage
         $content = $this->content;
         $this->content = ['_' => $content['_']];
         return $content;
-    }
-
-    /**
-     * Check if this message can be garbage collected.
-     */
-    public function canGarbageCollect(): bool
-    {
-        return (bool) ($this->state & self::STATE_READ);
     }
 
     /**
