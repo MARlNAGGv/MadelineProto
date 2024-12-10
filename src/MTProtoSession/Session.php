@@ -113,11 +113,13 @@ trait Session
     /**
      * Check queue.
      *
+     * @var list<MTProtoOutgoingMessage>
      */
     public array $check_queue = [];
     /**
      * Check queue.
      *
+     * @var list<MTProtoOutgoingMessage>
      */
     public array $unencrypted_check_queue = [];
     /**

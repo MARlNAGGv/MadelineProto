@@ -51,7 +51,7 @@ final class WriteLoop extends Loop
     use Common {
         __construct as init2;
     }
-    
+
     private int $pingTimeout;
     private float $pollTimeout;
     /**
@@ -175,19 +175,26 @@ final class WriteLoop extends Loop
                 return false;
             }
 
-            foreach ($this->connection->check_queue as $msg_id => $_) {
+            if ($check = $this->connection->check_queue) {
+                $this->connection->check_queue = [];
                 $deferred = new DeferredFuture();
                 $list = '';
-                // Don't edit this here pls
-                foreach ($message_ids as $message_id) {
-                    if (!isset($this->connection->outgoing_messages[$message_id])) {
+                $msgIds = [];
+                foreach ($check as $msg) {
+                    if ($msg->hasReply()) {
                         continue;
                     }
-                    $list .= $this->connection->outgoing_messages[$message_id]->constructor.', ';
+                    $id = $msg->getMsgId();
+                    if ($id === null) {
+                        $this->API->logger("$msg has no ID, cannot request status!", Logger::ERROR);
+                        continue;
+                    }
+                    $msgIds[] = $id;
+                    $list .= $msg->constructor.', ';
                 }
                 $this->API->logger("Still missing {$list} on DC {$this->datacenter}, sending state request", Logger::ERROR);
-                $this->connection->objectCall('msgs_state_req', ['msg_ids' => $message_ids], $deferred);
-                EventLoop::queue(function () use ($deferred, $message_ids): void {
+                $this->connection->objectCall('msgs_state_req', ['msg_ids' => $msgIds], $deferred);
+                EventLoop::queue(function () use ($deferred, $check): void {
                     try {
                         $result = $deferred->getFuture()->await(new TimeoutCancellation($this->pollTimeout));
                         if (\is_callable($result)) {
@@ -195,16 +202,11 @@ final class WriteLoop extends Loop
                         }
                         $reply = [];
                         foreach (str_split($result['info']) as $key => $chr) {
-                            $message_id = $message_ids[$key];
-                            if (!isset($this->connection->outgoing_messages[$message_id])) {
+                            $message = $check[$key];
+                            if ($message->hasReply()) {
                                 $this->API->logger("Already got response for and forgot about message ID $message_id");
                                 continue;
                             }
-                            if (!isset($this->connection->new_outgoing[$message_id])) {
-                                $this->API->logger('Already got response for '.$this->connection->outgoing_messages[$message_id]);
-                                continue;
-                            }
-                            $message = $this->connection->new_outgoing[$message_id];
                             $chr = \ord($chr);
                             switch ($chr & 7) {
                                 case 0:
@@ -214,36 +216,30 @@ final class WriteLoop extends Loop
                                 case 2:
                                 case 3:
                                     if ($message->constructor === 'msgs_state_req') {
-                                        $this->connection->gotResponseForOutgoingMessage($message);
+                                        $message->reply(null);
                                         break;
                                     }
                                     $this->API->logger("Message $message not received by server, resending...", Logger::ERROR);
-                                    $this->connection->methodRecall($message_id);
+                                    $this->connection->methodRecall($message);
                                     break;
                                 case 4:
                                     if ($chr & 128) {
-                                        $this->API->logger("Message $message received by server and was already sent, requesting reply...", Logger::ERROR);
-                                        $reply[] = $message_id;
+                                        $this->API->logger("Message $message received by server and was already sent.", Logger::ERROR);
                                     } elseif ($chr & 64) {
-                                        $this->API->logger("Message $message received by server and was already processed, requesting reply...", Logger::ERROR);
-                                        $reply[] = $message_id;
+                                        $this->API->logger("Message $message received by server and was already processed.", Logger::ERROR);
                                     } elseif ($chr & 32) {
                                         if ($message->getSent() + $this->resendTimeout < hrtime(true)) {
-                                            if ($message->cancellation?->isRequested()) {
-                                                unset($this->connection->new_outgoing[$message_id], $this->connection->outgoing_messages[$message_id]);
-
-                                                $this->API->logger("Cancelling $message...", Logger::ERROR);
-                                            } else {
+                                            if (!$message->cancellation?->isRequested()) {
                                                 $this->API->logger("Message $message received by server and is being processed for way too long, resending request...", Logger::ERROR);
-                                                $this->connection->methodRecall($message_id);
+                                                $this->connection->methodRecall($message);
                                             }
                                         } else {
                                             $this->API->logger("Message $message received by server and is being processed, waiting...", Logger::ERROR);
                                         }
                                     } else {
                                         $this->API->logger("Message $message received by server, waiting...", Logger::ERROR);
-                                        $reply[] = $message_id;
                                     }
+                                    break;
                             }
                         }
                         //} catch (CancelledException) {
@@ -479,6 +475,7 @@ final class WriteLoop extends Loop
 
             foreach ($keys as $key => $message) {
                 unset($this->connection->pendingOutgoing[$key]);
+                $message_id = $message->getMsgId();
                 $this->connection->outgoing_messages[$message_id] = $message;
                 if ($message->hasPromise()) {
                     $this->connection->new_outgoing[$message_id] = $message;

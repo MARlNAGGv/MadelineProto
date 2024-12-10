@@ -21,9 +21,7 @@ declare(strict_types=1);
 namespace danog\MadelineProto\MTProtoSession;
 
 use danog\MadelineProto\DataCenterConnection;
-use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto\MTProtoIncomingMessage;
-use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 
 /**
  * Manages acknowledgement of messages.
@@ -34,18 +32,6 @@ use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
  */
 trait AckHandler
 {
-    /**
-     * Acknowledge outgoing message ID.
-     */
-    public function ackOutgoingMessageId(int $message_id): bool
-    {
-        // The server acknowledges that it received my message
-        if (!isset($this->outgoing_messages[$message_id])) {
-            $this->API->logger("WARNING: Couldn't find message id ".$message_id.' in the array of outgoing messages. Maybe try to increase its size?', Logger::WARNING);
-            return false;
-        }
-        return true;
-    }
     /**
      * Acknowledge incoming message ID.
      */

@@ -182,10 +182,12 @@ class MTProtoOutgoingMessage extends MTProtoMessage
         }
         $this->state |= self::STATE_SENT;
         $this->sent = hrtime(true);
-        $this->checkTimer = EventLoop::delay(
-            $this->connection->API->getSettings()->getConnection()->getTimeout(),
-            $this->check(...)
-        );
+        if (!$this instanceof Container) {
+            $this->checkTimer = EventLoop::delay(
+                $this->connection->API->getSettings()->getConnection()->getTimeout(),
+                $this->check(...)
+            );
+        }
         if (isset($this->sendDeferred)) {
             $sendDeferred = $this->sendDeferred;
             $this->sendDeferred = null;
@@ -214,10 +216,11 @@ class MTProtoOutgoingMessage extends MTProtoMessage
             if (!$unencrypted && $pfsNotBound && $this->constructor !== 'auth.bindTempAuthKey') {
                 return;
             }
+            \assert($this->msgId !== null);
             if ($unencrypted) {
-                $this->connection->unencrypted_check_queue[$this->msgId] = true;
+                $this->connection->unencrypted_check_queue[] = $this;
             } else {
-                $this->connection->check_queue[$this->msgId] = true;
+                $this->connection->check_queue[] = $this;
             }
             $this->connection->flush();
         }
@@ -254,7 +257,17 @@ class MTProtoOutgoingMessage extends MTProtoMessage
             }
         }
         if ($this->msgId !== null) {
-            unset($this->connection->new_outgoing[$this->msgId], $this->connection->outgoing_messages[$this->msgId]);
+            if ($this->unencrypted) {
+                unset(
+                    $this->connection->unencrypted_new_outgoing[$this->msgId],
+                    $this->connection->outgoing_messages[$this->msgId],
+                );
+            } else {
+                unset(
+                    $this->connection->new_outgoing[$this->msgId],
+                    $this->connection->outgoing_messages[$this->msgId],
+                );
+            }
         }
 
         $this->serializedBody = null;

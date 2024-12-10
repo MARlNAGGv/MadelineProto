@@ -99,7 +99,9 @@ trait ResponseHandler
     {
         foreach ($message->read()['msg_ids'] as $msg_id) {
             // Acknowledge that the server received my message
-            $this->ackOutgoingMessageId($msg_id);
+            if (!isset($this->outgoing_messages[$msg_id])) {
+                $this->API->logger("WARNING: Couldn't find message id ".$msg_id.' in the array of outgoing messages. Maybe try to increase its size?', Logger::WARNING);
+            }
         }
     }
     private function handleFallback(MTProtoIncomingMessage $message): void
@@ -349,7 +351,7 @@ trait ResponseHandler
                     $this->API->authorized_dc = $this->API->datacenter->currentDatacenter;
                 }
                 $this->API->logger("Resending $request to new DC $datacenter...");
-                $this->methodRecall($request->getMsgId(), $datacenter);
+                $this->methodRecall($request, $datacenter);
                 return null;
             case 400:
                 if ($request->previousQueuedMessage &&
