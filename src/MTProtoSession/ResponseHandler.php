@@ -411,6 +411,7 @@ trait ResponseHandler
                 return static fn () => RPCErrorException::make($response['error_message'], $response['error_code'], $request->constructor);
             case 420:
                 $seconds = (int) preg_replace('/[^0-9]+/', '', $response['error_message']);
+                \assert($seconds > 0);
                 $limit = $request->floodWaitLimit ?? $this->API->settings->getRPC()->getFloodTimeout();
                 if ($seconds < $limit) {
                     $this->API->logger("Flood, waiting $seconds seconds before repeating async call of $request...", Logger::NOTICE);

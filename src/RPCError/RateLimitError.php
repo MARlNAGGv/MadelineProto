@@ -29,14 +29,30 @@ use function Amp\delay;
  */
 class RateLimitError extends RPCErrorException
 {
+    /**
+     * Indicates the absolute expiration time of the flood wait.
+     *
+     * @var positive-int
+     */
+    public readonly int $expires;
+
     /** @internal */
-    public function __construct(string $message, public readonly int $waitTime, int $code, string $caller, ?Exception $previous = null)
-    {
+    public function __construct(
+        string $message,
+        /** @var positive-int */
+        public readonly int $waitTime,
+        int $code,
+        string $caller,
+        ?Exception $previous = null
+    ) {
+        $this->expires = time() + $waitTime;
         parent::__construct($message, "A rate limit was encountered, please repeat the method call after $waitTime seconds", $code, $caller, $previous);
     }
 
     /**
      * Returns the required waiting period in seconds before repeating the RPC call.
+     *
+     * @return positive-int
      */
     public function getWaitTime(): int
     {
@@ -44,10 +60,23 @@ class RateLimitError extends RPCErrorException
     }
 
     /**
-     * Waits for the required waiting period.
+     * Returns the remaining waiting period in seconds before repeating the RPC call.
+     *
+     * @return int<0, max>
+     */
+    public function getWaitTimeLeft(): int
+    {
+        return max(0, $this->expires - time());
+    }
+
+    /**
+     * Waits for the remaining waiting period.
      */
     public function wait(?Cancellation $cancellation = null): void
     {
-        delay($this->waitTime, cancellation: $cancellation);
+        $left = $this->getWaitTimeLeft();
+        if ($left > 0) {
+            delay($left, cancellation: $cancellation);
+        }
     }
 }

@@ -162,6 +162,7 @@ Some of MadelineProto's core components are also available as separate, standalo
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGameScore &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGameScore.html) - Someone scored in a game.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGeoProximityReached &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGeoProximityReached.html) - A user of the chat is now in proximity of another user.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGiftPremium &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGiftPremium.html) - Info about a gifted Telegram Premium subscription.
+  * [danog\MadelineProto\EventHandler\Message\Service\DialogGiftStars &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGiftStars.html) - Info about a gifted Telegram Stars.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGroupCall &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGroupCall.html) - Represents a service message about a group call.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGroupCall\GroupCall &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGroupCall/GroupCall.html) - The group call has started or ended.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogGroupCall\GroupCallInvited &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogGroupCall/GroupCallInvited.html) - A set of users was invited to the group call.
@@ -179,11 +180,13 @@ Some of MadelineProto's core components are also available as separate, standalo
   * [danog\MadelineProto\EventHandler\Message\Service\DialogSetChatTheme &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogSetChatTheme.html) - The chat theme was changed.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogSetChatWallPaper &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogSetChatWallPaper.html) - The [wallpaper](https://core.telegram.org/api/wallpapers) of the current chat was changed.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogSetTTL &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogSetTTL.html) - The Time-To-Live of messages in this chat was changed.
+  * [danog\MadelineProto\EventHandler\Message\Service\DialogStarGift &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogStarGift.html) - Info about a Star gifted.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogSuggestProfilePhoto &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogSuggestProfilePhoto.html) - A new profile picture was suggested using [photos.uploadContactProfilePhoto](https://docs.madelineproto.xyz/API_docs/methods/photos.uploadContactProfilePhoto.html).
   * [danog\MadelineProto\EventHandler\Message\Service\DialogTitleChanged &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogTitleChanged.html) - The title of a channel or group has changed.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogTopicCreated &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogTopicCreated.html) - A [forum topic](https://core.telegram.org/api/forum#forum-topics) was created.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogTopicEdited &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogTopicEdited.html) - [Forum topic](https://core.telegram.org/api/forum#forum-topics) information was edited.
   * [danog\MadelineProto\EventHandler\Message\Service\DialogWebView &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Message/Service/DialogWebView.html) - Data from an opened [reply keyboard bot web app](https://core.telegram.org/api/bots/webapps) was relayed to the bot that owns it (user & bot side service message).
+  * [danog\MadelineProto\EventHandler\Payments\Payment &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Payments/Payment.html) - This object contains information about an incoming pre-checkout query.
   * [danog\MadelineProto\EventHandler\Pinned &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Pinned.html) - Indicates that some messages were pinned/unpinned.
   * [danog\MadelineProto\EventHandler\Pinned\PinnedChannelMessages &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Pinned/PinnedChannelMessages.html) - Represents messages that were pinned/unpinned in a [channel](https://core.telegram.org/api/channel).
   * [danog\MadelineProto\EventHandler\Pinned\PinnedGroupMessages &raquo;](https://docs.madelineproto.xyz/PHP/danog/MadelineProto/EventHandler/Pinned/PinnedGroupMessages.html) - Represents messages that were pinned/unpinned in a [chat/supergroup](https://core.telegram.org/api/channel).
@@ -569,7 +572,6 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/account.getChannelDefaultEmojiStatuses.html" name="account.getChannelDefaultEmojiStatuses">Get a list of default suggested channel emoji statuses: account.getChannelDefaultEmojiStatuses</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/account.getDefaultEmojiStatuses.html" name="account.getDefaultEmojiStatuses">Get a list of default suggested emoji statuses: account.getDefaultEmojiStatuses</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/phone.getGroupCallJoinAs.html" name="phone.getGroupCallJoinAs">Get a list of peers that can be used to join a group call, presenting yourself as a specific user/channel: phone.getGroupCallJoinAs</a>
-    * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.getSponsoredMessages.html" name="channels.getSponsoredMessages">Get a list of sponsored messages: channels.getSponsoredMessages</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#getWebMessage" name="getWebMessage">Get a message to show to the user when starting the bot: getWebMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.getPaymentForm.html" name="payments.getPaymentForm">Get a payment form: payments.getPaymentForm</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/account.getDefaultGroupPhotoEmojis.html" name="account.getDefaultGroupPhotoEmojis">Get a set of suggested custom emoji stickers that can be used as group picture: account.getDefaultGroupPhotoEmojis</a>
@@ -747,7 +749,6 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.assignAppStoreTransaction.html" name="payments.assignAppStoreTransaction">Informs server about a purchase made through the App Store: for official applications only: payments.assignAppStoreTransaction</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.assignPlayMarketTransaction.html" name="payments.assignPlayMarketTransaction">Informs server about a purchase made through the Play Store: for official applications only: payments.assignPlayMarketTransaction</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/help.setBotUpdatesStatus.html" name="help.setBotUpdatesStatus">Informs the server about the number of pending bot updates if they haven't been processed for a long time; for bots only: help.setBotUpdatesStatus</a>
-    * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.clickSponsoredMessage.html" name="channels.clickSponsoredMessage">Informs the server that the user has either:: channels.clickSponsoredMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/account.initTakeoutSession.html" name="account.initTakeoutSession">Initialize a takeout session, see here » for more info: account.initTakeoutSession</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/initConnection.html" name="initConnection">Initialize connection: initConnection</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#initSelfRestart" name="initSelfRestart">Initialize self-restart hack: initSelfRestart</a>
@@ -794,7 +795,6 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#htmlToMessageEntities" name="htmlToMessageEntities">Manually convert HTML to a message and a set of entities: htmlToMessageEntities</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#markdownToMessageEntities" name="markdownToMessageEntities">Manually convert markdown to a message and a set of entities: markdownToMessageEntities</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.markDialogUnread.html" name="messages.markDialogUnread">Manually mark dialog as unread: messages.markDialogUnread</a>
-    * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.viewSponsoredMessage.html" name="channels.viewSponsoredMessage">Mark a specific sponsored message as read: channels.viewSponsoredMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.readDiscussion.html" name="messages.readDiscussion">Mark a thread as read: messages.readDiscussion</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/stories.readStories.html" name="stories.readStories">Mark all stories up to a certain ID as read, for a given peer; will emit an updateReadStories update to all logged-in sessions: stories.readStories</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.readHistory.html" name="channels.readHistory">Mark channel/supergroup history as read: channels.readHistory</a>
@@ -1116,13 +1116,15 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/auth.reportMissingCode.html" name="auth.reportMissingCode">auth.reportMissingCode</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#base64urlDecode" name="base64urlDecode">base64URL decode: base64urlDecode</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.addPreviewMedia.html" name="bots.addPreviewMedia">bots.addPreviewMedia</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.checkDownloadFileParams.html" name="bots.checkDownloadFileParams">bots.checkDownloadFileParams</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.deletePreviewMedia.html" name="bots.deletePreviewMedia">bots.deletePreviewMedia</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.editPreviewMedia.html" name="bots.editPreviewMedia">bots.editPreviewMedia</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.getPopularAppBots.html" name="bots.getPopularAppBots">bots.getPopularAppBots</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.getPreviewInfo.html" name="bots.getPreviewInfo">bots.getPreviewInfo</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.getPreviewMedias.html" name="bots.getPreviewMedias">bots.getPreviewMedias</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.reorderPreviewMedias.html" name="bots.reorderPreviewMedias">bots.reorderPreviewMedias</a>
-    * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.reportSponsoredMessage.html" name="channels.reportSponsoredMessage">channels.reportSponsoredMessage</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.toggleUserEmojiStatusPermission.html" name="bots.toggleUserEmojiStatusPermission">bots.toggleUserEmojiStatusPermission</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/bots.updateUserEmojiStatus.html" name="bots.updateUserEmojiStatus">bots.updateUserEmojiStatus</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.restrictSponsoredMessages.html" name="channels.restrictSponsoredMessages">channels.restrictSponsoredMessages</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.searchPosts.html" name="channels.searchPosts">channels.searchPosts</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/channels.setBoostsToUnblockRestrictions.html" name="channels.setBoostsToUnblockRestrictions">channels.setBoostsToUnblockRestrictions</a>
@@ -1134,6 +1136,7 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/invokeWithBusinessConnection.html" name="invokeWithBusinessConnection">invokeWithBusinessConnection</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/invokeWithGooglePlayIntegrity.html" name="invokeWithGooglePlayIntegrity">invokeWithGooglePlayIntegrity</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.checkQuickReplyShortcut.html" name="messages.checkQuickReplyShortcut">messages.checkQuickReplyShortcut</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.clickSponsoredMessage.html" name="messages.clickSponsoredMessage">messages.clickSponsoredMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.deleteFactCheck.html" name="messages.deleteFactCheck">messages.deleteFactCheck</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.deleteQuickReplyMessages.html" name="messages.deleteQuickReplyMessages">messages.deleteQuickReplyMessages</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.deleteQuickReplyShortcut.html" name="messages.deleteQuickReplyShortcut">messages.deleteQuickReplyShortcut</a>
@@ -1146,18 +1149,24 @@ Some of MadelineProto's core components are also available as separate, standalo
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getMyStickers.html" name="messages.getMyStickers">messages.getMyStickers</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getOutboxReadDate.html" name="messages.getOutboxReadDate">messages.getOutboxReadDate</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getPaidReactionPrivacy.html" name="messages.getPaidReactionPrivacy">messages.getPaidReactionPrivacy</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getPreparedInlineMessage.html" name="messages.getPreparedInlineMessage">messages.getPreparedInlineMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getQuickReplies.html" name="messages.getQuickReplies">messages.getQuickReplies</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getQuickReplyMessages.html" name="messages.getQuickReplyMessages">messages.getQuickReplyMessages</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getSavedReactionTags.html" name="messages.getSavedReactionTags">messages.getSavedReactionTags</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.getSponsoredMessages.html" name="messages.getSponsoredMessages">messages.getSponsoredMessages</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.reorderQuickReplies.html" name="messages.reorderQuickReplies">messages.reorderQuickReplies</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.reportSponsoredMessage.html" name="messages.reportSponsoredMessage">messages.reportSponsoredMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.requestMainWebView.html" name="messages.requestMainWebView">messages.requestMainWebView</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.savePreparedInlineMessage.html" name="messages.savePreparedInlineMessage">messages.savePreparedInlineMessage</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.sendPaidReaction.html" name="messages.sendPaidReaction">messages.sendPaidReaction</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.sendQuickReplyMessages.html" name="messages.sendQuickReplyMessages">messages.sendQuickReplyMessages</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.toggleDialogFilterTags.html" name="messages.toggleDialogFilterTags">messages.toggleDialogFilterTags</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.togglePaidReactionPrivacy.html" name="messages.togglePaidReactionPrivacy">messages.togglePaidReactionPrivacy</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.updateSavedReactionTag.html" name="messages.updateSavedReactionTag">messages.updateSavedReactionTag</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/messages.viewSponsoredMessage.html" name="messages.viewSponsoredMessage">messages.viewSponsoredMessage</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#rleDecode" name="rleDecode">null-byte RLE decode: rleDecode</a>
     * <a href="https://docs.madelineproto.xyz/PHP/danog/MadelineProto/API.html#rleEncode" name="rleEncode">null-byte RLE encode: rleEncode</a>
+    * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.botCancelStarsSubscription.html" name="payments.botCancelStarsSubscription">payments.botCancelStarsSubscription</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.changeStarsSubscription.html" name="payments.changeStarsSubscription">payments.changeStarsSubscription</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.convertStarGift.html" name="payments.convertStarGift">payments.convertStarGift</a>
     * <a href="https://docs.madelineproto.xyz/API_docs/methods/payments.fulfillStarsSubscription.html" name="payments.fulfillStarsSubscription">payments.fulfillStarsSubscription</a>
