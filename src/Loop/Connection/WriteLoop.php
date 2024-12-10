@@ -265,7 +265,6 @@ final class WriteLoop extends Loop
 
             $has_state = false;
             $has_resend = false;
-            $has_http_wait = false;
             foreach ($this->connection->pendingOutgoing as $k => $message) {
                 if ($message->unencrypted) {
                     continue;
@@ -282,13 +281,10 @@ final class WriteLoop extends Loop
                     continue;
                 }
                 $constructor = $message->constructor;
-                if ($this->shared->getGenericSettings()->getAuth()->getPfs() && !$this->shared->isBound() && !$this->connection->isCDN() && $message->isMethod && !\in_array($constructor, ['http_wait', 'auth.bindTempAuthKey'], true)) {
+                if ($this->shared->getGenericSettings()->getAuth()->getPfs() && !$this->shared->isBound() && !$this->connection->isCDN() && $message->isMethod && $constructor !== 'auth.bindTempAuthKey') {
                     $this->API->logger("Skipping $message due to unbound keys in DC $this->datacenter");
                     $skipped = true;
                     continue;
-                }
-                if ($constructor === 'http_wait') {
-                    $has_http_wait = true;
                 }
                 if ($constructor === 'msgs_state_req') {
                     if ($has_state) {
@@ -322,7 +318,7 @@ final class WriteLoop extends Loop
                     'body' => $message->getSerializedBody(),
                     'seqno' => $message->getSeqNo() ?? $this->connection->generateOutSeqNo($message->contentRelated),
                 ];
-                if ($message->isMethod && $constructor !== 'http_wait' && $constructor !== 'ping_delay_disconnect' && $constructor !== 'auth.bindTempAuthKey') {
+                if ($message->isMethod && $constructor !== 'ping_delay_disconnect' && $constructor !== 'auth.bindTempAuthKey') {
                     if (!$this->shared->getTempAuthKey()->isInited()) {
                         if ($constructor === 'help.getConfig' || $constructor === 'upload.getCdnFile') {
                             $this->API->logger(sprintf('Writing client info (also executing %s)...', $constructor), Logger::NOTICE);
@@ -417,7 +413,7 @@ final class WriteLoop extends Loop
                 $count++;
                 unset($acks, $body);
             }
-            if ($this->connection->isHttp() && !$has_http_wait) {
+            if ($this->connection->isHttp()) {
                 $this->API->logger('Adding http_wait', Logger::ULTRA_VERBOSE);
                 $body = $this->API->getTL()->serializeObject(['type' => ''], ['_' => 'http_wait', 'max_wait' => 30000, 'wait_after' => 0, 'max_delay' => 0], 'http_wait');
                 $messages []= [

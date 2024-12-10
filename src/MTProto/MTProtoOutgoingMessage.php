@@ -182,7 +182,7 @@ class MTProtoOutgoingMessage extends MTProtoMessage
         }
         $this->state |= self::STATE_SENT;
         $this->sent = hrtime(true);
-        if (!$this instanceof Container) {
+        if ($this->contentRelated) {
             $this->checkTimer = EventLoop::delay(
                 $this->connection->API->getSettings()->getConnection()->getTimeout(),
                 $this->check(...)
@@ -287,6 +287,9 @@ class MTProtoOutgoingMessage extends MTProtoMessage
     public function ack(): void
     {
         $this->state |= self::STATE_ACKED;
+        if (!$this->resultDeferred) {
+            $this->reply(null);
+        }
     }
     /**
      * Get state of message.

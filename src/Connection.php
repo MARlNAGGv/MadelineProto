@@ -28,7 +28,6 @@ use AssertionError;
 use danog\DialogId\DialogId;
 use danog\Loop\GenericLoop;
 use danog\MadelineProto\Loop\Connection\CleanupLoop;
-use danog\MadelineProto\Loop\Connection\HttpWaitLoop;
 use danog\MadelineProto\Loop\Connection\ReadLoop;
 use danog\MadelineProto\Loop\Connection\WriteLoop;
 use danog\MadelineProto\MTProto\MTProtoIncomingMessage;
@@ -71,11 +70,6 @@ final class Connection
      *
      */
     protected ?ReadLoop $reader = null;
-    /**
-     * Waiter loop.
-     *
-     */
-    protected ?HttpWaitLoop $waiter = null;
     /**
      * Cleanup loop.
      *

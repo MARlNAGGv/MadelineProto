@@ -166,11 +166,11 @@ trait ResponseHandler
         /*if (isset($this->incoming_messages[$referencedMsgId])) {
             $this->incoming_messages[$referencedMsgId]->ack();
         } else {*/
-            $this->msgIdHandler->checkIncomingMessageId($referencedMsgId, true);
-            $message = new MTProtoIncomingMessage($this, $content['orig_message'], $referencedMsgId, $message->unencrypted);
-            $this->incomingCtr?->inc();
-            //$this->incoming_messages[$referencedMsgId] = $message;
-            $this->handleMessages([$message]);
+        $this->msgIdHandler->checkIncomingMessageId($referencedMsgId, true);
+        $message = new MTProtoIncomingMessage($this, $content['orig_message'], $referencedMsgId, $message->unencrypted);
+        $this->incomingCtr?->inc();
+        //$this->incoming_messages[$referencedMsgId] = $message;
+        $this->handleMessages([$message]);
         //}
     }
 
