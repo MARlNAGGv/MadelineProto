@@ -53,7 +53,7 @@ trait CallHandler
     public function methodRecall(MTProtoOutgoingMessage $request, ?int $forceDatacenter = null, float|Future|null $defer = null): void
     {
         $id = $request->getMsgId();
-        unset($this->outgoing_messages[$id], $this->new_outgoing[$id]);
+        unset($this->outgoing_messages[$id], $this->new_outgoing[$id], $this->unencrypted_new_outgoing[$id]);
         if ($request instanceof Container) {
             foreach ($request->msgs as $msg) {
                 $this->methodRecall($msg, $forceDatacenter, $defer);

@@ -38,7 +38,6 @@ use SplQueue;
 trait Session
 {
     use AuthKeyHandler;
-    use AckHandler;
     use ResponseHandler;
     use SeqNoHandler;
     use CallHandler;
@@ -160,6 +159,8 @@ trait Session
         $incoming = [];
         foreach ($this->incoming_messages as $key => $message) {
             if ($message->canGarbageCollect()) {
+                $this->API->logger("Collecting incoming $message in DC {$this->datacenter}", Logger::VERBOSE);
+
                 $count++;
             } else {
                 $this->API->logger("Can't garbage collect $message in DC {$this->datacenter}, not handled yet!", Logger::VERBOSE);
@@ -176,6 +177,8 @@ trait Session
         $outgoing = [];
         foreach ($this->outgoing_messages as $key => $message) {
             if ($message->canGarbageCollect()) {
+                $this->API->logger("Collecting outgiong $message in DC {$this->datacenter}", Logger::VERBOSE);
+
                 $count++;
             } else {
                 $ago = (hrtime(true) - $message->getSent()) / 1_000_000_000;

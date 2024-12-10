@@ -20,6 +20,8 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\MTProto;
 
+use danog\MadelineProto\Connection;
+
 /**
  * Incoming message.
  *
@@ -70,7 +72,7 @@ final class MTProtoIncomingMessage extends MTProtoMessage
      * @param array   $content       Content
      * @param boolean $fromContainer Whether this message was in a container
      */
-    public function __construct(array $content, int $msgId, public readonly bool $unencrypted, public readonly bool $fromContainer = false)
+    public function __construct(private readonly Connection $connection, array $content, int $msgId, public readonly bool $unencrypted, public readonly bool $fromContainer = false)
     {
         $this->content = $content;
         $this->msgId = $msgId;
@@ -135,6 +137,10 @@ final class MTProtoIncomingMessage extends MTProtoMessage
     public function ack(): void
     {
         $this->state |= self::STATE_ACKED;
+        if ($this->contentRelated) {
+            // I let the server know that I received its message
+            $this->connection->ack_queue[$this->msgId] = $this->msgId;
+        }
     }
     /**
      * Read this message, clearing its contents.

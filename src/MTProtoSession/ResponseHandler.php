@@ -106,7 +106,7 @@ trait ResponseHandler
     }
     private function handleFallback(MTProtoIncomingMessage $message): void
     {
-        $this->ackIncomingMessage($message);
+        $message->ack();
         $response_type = $this->API->getTL()->getConstructors()->findByPredicate($message->getContent()['_'])['type'];
         if ($response_type == 'Updates') {
             if ($message->unencrypted) {
@@ -135,7 +135,7 @@ trait ResponseHandler
     }
     private function handleNewSession(MTProtoIncomingMessage $message): void
     {
-        $this->ackIncomingMessage($message);
+        $message->ack();
         $this->shared->getTempAuthKey()->setServerSalt($message->read()['server_salt']);
         if ($this->API->authorized === \danog\MadelineProto\API::LOGGED_IN
             && isset($this->API->updaters[UpdateLoop::GENERIC])
@@ -149,7 +149,7 @@ trait ResponseHandler
         $tmp->setIteratorMode(SplQueue::IT_MODE_DELETE);
         foreach ($message->read()['messages'] as $msg) {
             $this->msgIdHandler->checkIncomingMessageId($msg['msg_id'], true);
-            $newMessage = new MTProtoIncomingMessage($msg['body'], $msg['msg_id'], $message->unencrypted, true);
+            $newMessage = new MTProtoIncomingMessage($this->connection, $msg['body'], $msg['msg_id'], $message->unencrypted, true);
             $newMessage->setSeqNo($msg['seqno']);
             $this->checkInSeqNo($newMessage);
             $newMessage->setSeqNo(null);
@@ -162,14 +162,14 @@ trait ResponseHandler
     }
     private function handleMsgCopy(MTProtoIncomingMessage $message): void
     {
-        $this->ackIncomingMessage($message);
+        $message->ack();
         $content = $message->read();
         $referencedMsgId = $content['msg_id'];
         if (isset($this->incoming_messages[$referencedMsgId])) {
-            $this->ackIncomingMessage($this->incoming_messages[$referencedMsgId]);
+            $this->incoming_messages[$referencedMsgId]->ack();
         } else {
             $this->msgIdHandler->checkIncomingMessageId($referencedMsgId, true);
-            $message = new MTProtoIncomingMessage($content['orig_message'], $referencedMsgId, $message->unencrypted);
+            $message = new MTProtoIncomingMessage($this->connection, $content['orig_message'], $referencedMsgId, $message->unencrypted);
             $this->incomingCtr?->inc();
             $this->incoming_messages[$referencedMsgId] = $message;
             $this->handleMessages([$message]);
@@ -187,7 +187,7 @@ trait ResponseHandler
             if ($message->unencrypted) {
                 throw new SecurityException("Can't accept unencrypted result!");
             }
-            $this->ackIncomingMessage($message);
+            $message->ack();
             $response = $response['result'];
         }
         if (!isset($this->outgoing_messages[$requestId])) {

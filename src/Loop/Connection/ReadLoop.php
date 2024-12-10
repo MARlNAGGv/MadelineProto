@@ -246,7 +246,7 @@ final class ReadLoop extends Loop
                 $this->API->referenceDatabase->reset();
             }
 
-            $message = new MTProtoIncomingMessage($deserialized, $message_id, $unencrypted);
+            $message = new MTProtoIncomingMessage($this->connection, $deserialized, $message_id, $unencrypted);
             if (isset($seq_no)) {
                 $message->setSeqNo($seq_no);
             }

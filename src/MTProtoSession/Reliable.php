@@ -37,7 +37,7 @@ trait Reliable
     public function onNewMsgDetailedInfo(array $content): void
     {
         if (isset($this->incoming_messages[$content['answer_msg_id']])) {
-            $this->ackIncomingMessage($this->incoming_messages[$content['answer_msg_id']]);
+            $this->incoming_messages[$content['answer_msg_id']]->ack();
         } else {
             EventLoop::queue($this->objectCall(...), 'msg_resend_req', ['msg_ids' => [$content['answer_msg_id']]]);
         }
