@@ -75,7 +75,7 @@ final class Connection
      * Ping loop.
      *
      */
-    protected ?PingLoop $pinger = null;
+    public ?PingLoop $pinger = null;
     /**
      * Cleanup loop.
      *
