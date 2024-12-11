@@ -107,6 +107,7 @@ trait Session
     /**
      * Ack queue.
      *
+     * @var list<int>
      */
     public array $ack_queue = [];
     /**

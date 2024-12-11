@@ -136,11 +136,11 @@ final class MTProtoIncomingMessage extends MTProtoMessage
      */
     public function ack(): void
     {
-        $this->state |= self::STATE_ACKED;
-        if ($this->contentRelated) {
+        if ($this->contentRelated && !($this->state & self::STATE_ACKED)) {
             // I let the server know that I received its message
-            $this->connection->ack_queue[$this->msgId] = $this->msgId;
+            $this->connection->ack_queue []= $this->msgId;
         }
+        $this->state |= self::STATE_ACKED;
     }
     /**
      * Read this message, clearing its contents.
