@@ -156,8 +156,6 @@ final class WriteLoop extends Loop
                 unset($this->connection->pendingOutgoing[$k]);
                 $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                 $message->setMsgId($message_id);
-                $this->connection->unencrypted_new_outgoing[$message_id] = $message;
-
                 $message->sent();
             }
             if ($skipped_all) {
@@ -485,9 +483,6 @@ final class WriteLoop extends Loop
 
             foreach ($keys as $key => $message) {
                 unset($this->connection->pendingOutgoing[$key]);
-                if ($message->hasPromise()) {
-                    $this->connection->new_outgoing[$message->getMsgId()] = $message;
-                }
                 $message->sent();
             }
             $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
