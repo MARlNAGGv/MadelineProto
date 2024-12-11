@@ -44,32 +44,23 @@ final class WriteLoop extends Loop
 {
     private const MAX_COUNT = 1020;
     private const MAX_SIZE = 1 << 15;
-    private const LONG_POLL_TIMEOUT = 30;
-    private const LONG_POLL_TIMEOUT_MS = self::LONG_POLL_TIMEOUT*1000;
+    private const LONG_POLL_TIMEOUT = 30.0;
+    private const LONG_POLL_TIMEOUT_MS = 30_000;
     public const MAX_IDS = 8192;
+
 
     use Common {
         __construct as init2;
     }
 
-    private int $pingTimeout;
-    private float $pollTimeout;
+    private readonly bool $isHttp;
 
-    private int $nextPingAt = 0;
     /**
      * Constructor function.
      */
     public function __construct(Connection $connection)
     {
         $this->init2($connection);
-        $timeout = $this->shared->getSettings()->getPingInterval();
-        $this->pingTimeout = $timeout + 15;
-
-        if ($this->connection->isHttp()) {
-            $this->pollTimeout = (float) min(self::LONG_POLL_TIMEOUT, $timeout);
-        } else {
-            $this->pollTimeout = (float) $timeout;
-        }
     }
     /**
      * Main loop.
@@ -85,7 +76,7 @@ final class WriteLoop extends Loop
             }
             if (!$this->connection->pendingOutgoing && !$first) {
                 $this->API->logger("No messages, pausing in $this...", Logger::ULTRA_VERBOSE);
-                return $this->pollTimeout;
+                return self::LONG_POLL_TIMEOUT;
             }
             if ($please_wait) {
                 $this->API->logger("Have to wait for handshake, pausing in $this...", Logger::ULTRA_VERBOSE);
@@ -420,19 +411,6 @@ final class WriteLoop extends Loop
                     'msg_id' => $this->connection->msgIdHandler->generateMessageId(),
                     'body' => $body,
                     'seqno' => $this->connection->generateOutSeqNo(true),
-                    'bytes' => \strlen($body),
-                ];
-                $count++;
-                unset($body);
-            }
-            if (!$count) {
-                $this->API->logger('Adding ping', Logger::ULTRA_VERBOSE);
-                $body = $this->API->getTL()->serializeMethod('ping_delay_disconnect', ['ping_id' => random_bytes(8), 'disconnect_delay' => $this->pingTimeout]);
-                $messages []= [
-                    '_' => 'MTmessage',
-                    'msg_id' => $this->connection->msgIdHandler->generateMessageId(),
-                    'body' => $body,
-                    'seqno' => $this->connection->generateOutSeqNo(false),
                     'bytes' => \strlen($body),
                 ];
                 $count++;
