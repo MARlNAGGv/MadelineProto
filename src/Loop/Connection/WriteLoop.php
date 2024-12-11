@@ -48,7 +48,6 @@ final class WriteLoop extends Loop
     private const LONG_POLL_TIMEOUT_MS = 30_000;
     public const MAX_IDS = 8192;
 
-
     use Common {
         __construct as init2;
     }
@@ -434,7 +433,7 @@ final class WriteLoop extends Loop
                 $message_id = $message['msg_id'];
                 $seq_no = $message['seqno'];
             } else {
-                $this->API->logger("NO MESSAGE SENT in $this, pending ".implode(', ', array_map('strval', $this->connection->pendingOutgoing)), Logger::WARNING);
+                //$this->API->logger("NO MESSAGE SENT in $this, pending ".implode(', ', array_map('strval', $this->connection->pendingOutgoing)), Logger::WARNING);
                 return true;
             }
             unset($messages);

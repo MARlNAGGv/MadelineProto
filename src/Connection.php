@@ -291,7 +291,10 @@ final class Connection
                 $this->writer ??= new WriteLoop($this);
                 $this->reader ??= new ReadLoop($this);
                 $this->cleanup ??= new CleanupLoop($this);
-                $this->handler ??= new GenericLoop(fn () => $this->handleMessages($this->new_incoming), "Handler loop");
+                $this->handler ??= new GenericLoop(function (): void {
+                    $this->handleMessages($this->new_incoming);
+                    $this->flush(); // Flush any acks
+                }, "Handler loop");
                 if (!isset($this->pinger) && !$ctx->isMedia() && !$ctx->isCDN() && !$this->isHttp()) {
                     $this->pinger = new PingLoop($this);
                 }
