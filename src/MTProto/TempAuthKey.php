@@ -20,6 +20,9 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\MTProto;
 
+use danog\MadelineProto\Reactive\Emitter;
+use danog\MadelineProto\Reactive\WatchedVariable;
+use danog\MadelineProto\Reactive\Watcher;
 use JsonSerializable;
 
 /**
@@ -42,8 +45,9 @@ final class TempAuthKey extends AuthKey implements JsonSerializable
     /**
      * Whether the connection is inited for this auth key.
      *
+     * @var WatchedVariable<bool>
      */
-    protected bool $inited = false;
+    protected WatchedVariable $initedVar;
     /**
      * Constructor function.
      *
@@ -51,6 +55,7 @@ final class TempAuthKey extends AuthKey implements JsonSerializable
      */
     public function __construct(array $old = [])
     {
+        $this->initedVar = new WatchedVariable(false);
         parent::__construct($old);
         if (isset($old['expires'])) {
             $this->expires($old['expires']);
@@ -59,6 +64,10 @@ final class TempAuthKey extends AuthKey implements JsonSerializable
             $this->init($old['connection_inited']);
         }
     }
+    public function __wakeup()
+    {
+        $this->initedVar ??= new WatchedVariable($this->inited);
+    }
     /**
      * Init or deinit connection for auth key.
      *
@@ -66,14 +75,21 @@ final class TempAuthKey extends AuthKey implements JsonSerializable
      */
     public function init(bool $init = true): void
     {
-        $this->inited = $init;
+        $this->initedVar->set($init);
     }
     /**
      * Check if connection is inited for auth key.
      */
     public function isInited(): bool
     {
-        return $this->inited;
+        return $this->initedVar->get();
+    }
+    /**
+     * Check if connection is inited for auth key.
+     */
+    public function watchInited(Watcher $w): void
+    {
+        $this->initedVar->watch($w);
     }
     /**
      * Bind auth key.
@@ -134,13 +150,13 @@ final class TempAuthKey extends AuthKey implements JsonSerializable
      */
     public function jsonSerialize(): array
     {
-        return ['auth_key' => 'pony'.base64_encode($this->authKey), 'server_salt' => $this->serverSalt, 'bound' => $this->isBound(), 'expires' => $this->expires, 'connection_inited' => $this->inited];
+        return ['auth_key' => 'pony'.base64_encode($this->authKey), 'server_salt' => $this->serverSalt, 'bound' => $this->isBound(), 'expires' => $this->expires, 'connection_inited' => $this->initedVar->get()];
     }
     /**
      * Sleep function.
      */
     public function __sleep(): array
     {
-        return ['authKey', 'id', 'serverSalt', 'bound', 'expires', 'inited'];
+        return ['authKey', 'id', 'serverSalt', 'bound', 'expires', 'initedVar'];
     }
 }

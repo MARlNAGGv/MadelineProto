@@ -28,6 +28,7 @@ use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto\Container;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\MTProtoTools\Crypt;
+use danog\MadelineProto\Reactive\Watcher;
 use danog\MadelineProto\Tools;
 use Revolt\EventLoop;
 
@@ -308,7 +309,11 @@ final class WriteLoop extends Loop
                     'seqno' => $message->getSeqNo() ?? $this->connection->generateOutSeqNo($message->contentRelated),
                 ];
                 if ($message->isMethod && $constructor !== 'auth.bindTempAuthKey') {
-                    if (!$this->shared->getTempAuthKey()->isInited()) {
+                    $isInited = Watcher::from(function (Watcher $w): \Closure {
+                        $this->shared->getTempAuthKey()->watchInited($w);
+                        return fn (): bool => $this->shared->getTempAuthKey()->isInited();
+                    });
+                    if (!$isInited) {
                         if ($constructor === 'help.getConfig' || $constructor === 'upload.getCdnFile') {
                             $this->API->logger(sprintf('Writing client info (also executing %s)...', $constructor), Logger::NOTICE);
                             $MTmessage['body'] = ($this->API->getTL()->serializeMethod('invokeWithLayer', [

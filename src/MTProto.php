@@ -68,6 +68,7 @@ use danog\MadelineProto\MTProtoTools\PeerHandler;
 use danog\MadelineProto\MTProtoTools\ReferenceDatabase;
 use danog\MadelineProto\MTProtoTools\ResponseInfo;
 use danog\MadelineProto\MTProtoTools\UpdateHandler;
+use danog\MadelineProto\Reactive\Emitter;
 use danog\MadelineProto\Settings\Database\DriverDatabaseAbstract;
 use danog\MadelineProto\Settings\TLSchema;
 use danog\MadelineProto\TL\Conversion\BotAPI;
@@ -195,6 +196,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      *
      */
     public Settings $settings;
+    public Emitter $settingsEmitter;
     /**
      * Config array.
      *
@@ -1309,6 +1311,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if ($settings instanceof SettingsEmpty) {
             if (!isset($this->settings)) {
                 $this->settings = new Settings;
+                $this->settingsEmitter->update();
             } else {
                 if ($this->v !== API::RELEASE || $this->settings->getSchema()->needsUpgrade()) {
                     $this->setupLogger();
@@ -1328,6 +1331,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             } else {
                 $this->settings->merge($settings);
             }
+            $this->settingsEmitter->update();
         }
         if (!$this->settings->getAppInfo()->hasApiInfo()) {
             throw new Exception(Lang::$current_lang['api_not_set'], 0, null, 'MadelineProto', 1);
