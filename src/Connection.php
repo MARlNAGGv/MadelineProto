@@ -28,6 +28,7 @@ use AssertionError;
 use danog\DialogId\DialogId;
 use danog\Loop\GenericLoop;
 use danog\MadelineProto\Loop\Connection\CleanupLoop;
+use danog\MadelineProto\Loop\Connection\PingLoop;
 use danog\MadelineProto\Loop\Connection\ReadLoop;
 use danog\MadelineProto\Loop\Connection\WriteLoop;
 use danog\MadelineProto\MTProto\MTProtoIncomingMessage;
@@ -70,6 +71,11 @@ final class Connection
      *
      */
     protected ?ReadLoop $reader = null;
+    /**
+     * Ping loop.
+     *
+     */
+    protected ?PingLoop $pinger = null;
     /**
      * Cleanup loop.
      *
@@ -286,12 +292,18 @@ final class Connection
                 $this->reader ??= new ReadLoop($this);
                 $this->cleanup ??= new CleanupLoop($this);
                 $this->handler ??= new GenericLoop(fn () => $this->handleMessages($this->new_incoming), "Handler loop");
+                if (!isset($this->pinger) && !$ctx->isMedia() && !$ctx->isCDN() && !$this->isHttp()) {
+                    $this->pinger = new PingLoop($this);
+                }
                 foreach ($this->unencrypted_new_outgoing as $message) {
                     $message->reply(static fn () => new Exception('Restart because we were reconnected'));
                 }
                 Assert::true($this->writer->start(), "Could not start writer stream");
                 Assert::true($this->reader->start(), "Could not start reader stream");
                 Assert::true($this->cleanup->start(), "Could not start cleanup stream");
+                if ($this->pinger) {
+                    Assert::true($this->pinger->start(), "Could not start pinger stream");
+                }
                 $this->handler->start();
 
                 EventLoop::queue($this->shared->initAuthorization(...));
