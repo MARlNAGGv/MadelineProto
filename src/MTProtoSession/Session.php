@@ -142,7 +142,7 @@ trait Session
             $q->setIteratorMode(SplQueue::IT_MODE_DELETE);
             $this->new_incoming = $q;
         }
-        foreach ($this->new_outgoing as &$msg) {
+        foreach ($this->new_outgoing as $msg) {
             if ($msg->hasMsgId()) {
                 $msg->setMsgId(null);
             }

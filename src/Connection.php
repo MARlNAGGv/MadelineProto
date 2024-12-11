@@ -293,7 +293,9 @@ final class Connection
                 $this->cleanup ??= new CleanupLoop($this);
                 $this->handler ??= new GenericLoop(function (): void {
                     $this->handleMessages($this->new_incoming);
-                    $this->flush(); // Flush any acks
+                    if ($this->ack_queue) {
+                        $this->flush(); // Flush acks
+                    }
                 }, "Handler loop");
                 if (!isset($this->pinger) && !$ctx->isMedia() && !$ctx->isCDN() && !$this->isHttp()) {
                     $this->pinger = new PingLoop($this);
