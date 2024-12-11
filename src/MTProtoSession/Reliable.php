@@ -47,7 +47,7 @@ trait Reliable
      */
     public function onMsgDetailedInfo(array $content): void
     {
-        if (isset($this->outgoing_messages[$content['msg_id']])) {
+        if (isset($this->new_outgoing[$content['msg_id']])) {
             $this->onNewMsgDetailedInfo($content);
         }
     }
@@ -58,14 +58,14 @@ trait Reliable
     {
         $ok = true;
         foreach ($content['msg_ids'] as $msg_id) {
-            if (!isset($this->outgoing_messages[$msg_id])) {
+            if (!isset($this->new_outgoing[$msg_id])) {
                 $ok = false;
             }
         }
         if ($ok) {
             foreach ($content['msg_ids'] as $msg_id) {
-                if (isset($this->outgoing_messages[$msg_id])) {
-                    $this->methodRecall($this->outgoing_messages[$msg_id]);
+                if (isset($this->new_outgoing[$msg_id])) {
+                    $this->methodRecall($this->new_outgoing[$msg_id]);
                 }
             }
         } else {

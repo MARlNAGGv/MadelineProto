@@ -211,7 +211,7 @@ class Builder
 
         if ($predicate === 'rpc_result') {
             $result = "\$tmp = ['_' => '$predicate', 'req_msg_id' => \$id = {$this->buildType('long')}];\n";
-            $result .= '$message = $this->connection->outgoing_messages[$id];
+            $result .= '$message = $this->connection->new_outgoing[$id];
             $method = $message->constructor;
             if (isset($this->beforeMethodResponseDeserialization[$method])) {
                 foreach ($this->beforeMethodResponseDeserialization[$method] as $callback) {

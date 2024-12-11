@@ -286,7 +286,7 @@ final class Connection
                 $this->reader ??= new ReadLoop($this);
                 $this->cleanup ??= new CleanupLoop($this);
                 $this->handler ??= new GenericLoop(fn () => $this->handleMessages($this->new_incoming), "Handler loop");
-                foreach ($this->unencrypted_new_outgoing as $message_id => $message) {
+                foreach ($this->unencrypted_new_outgoing as $message) {
                     $message->reply(static fn () => new Exception('Restart because we were reconnected'));
                 }
                 Assert::true($this->writer->start(), "Could not start writer stream");

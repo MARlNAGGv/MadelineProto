@@ -63,7 +63,7 @@ trait Session
      *
      * @var array<MTProtoOutgoingMessage>
      */
-    public array $outgoing_messages = [];
+    //public array $outgoing_messages = [];
     /**
      * New incoming message ID array.
      *
@@ -141,7 +141,7 @@ trait Session
             $q->setIteratorMode(SplQueue::IT_MODE_DELETE);
             $this->new_incoming = $q;
         }
-        foreach ($this->outgoing_messages as &$msg) {
+        foreach ($this->new_outgoing as &$msg) {
             if ($msg->hasMsgId()) {
                 $msg->setMsgId(null);
             }
@@ -155,27 +155,6 @@ trait Session
      */
     public function cleanupSession(): void
     {
-        $count = 0;
-        $outgoing = [];
-        foreach ($this->outgoing_messages as $key => $message) {
-            if ($message->canGarbageCollect()) {
-                $this->API->logger("Collecting outgiong $message in DC {$this->datacenter}", Logger::VERBOSE);
-
-                $count++;
-            } else {
-                $ago = (hrtime(true) - $message->getSent()) / 1_000_000_000;
-                if ($ago > 2) {
-                    $this->API->logger("Can't garbage collect $message in DC {$this->datacenter}, no response has been received or it wasn't yet handled!", Logger::VERBOSE);
-                }
-                $outgoing[$key] = $message;
-            }
-        }
-        $this->outgoing_messages = $outgoing;
-        $total = \count($this->outgoing_messages);
-        if ($count+$total) {
-            $this->API->logger("Garbage collected $count outgoing messages in DC {$this->datacenter}, $total left", Logger::VERBOSE);
-        }
-
         $new_outgoing = [];
         foreach ($this->new_outgoing as $key => $message) {
             $new_outgoing[$key] = $message;

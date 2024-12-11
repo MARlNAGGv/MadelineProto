@@ -54,6 +54,8 @@ final class WriteLoop extends Loop
 
     private int $pingTimeout;
     private float $pollTimeout;
+
+    private int $nextPingAt = 0;
     /**
      * Constructor function.
      */
@@ -64,7 +66,7 @@ final class WriteLoop extends Loop
         $this->pingTimeout = $timeout + 15;
 
         if ($this->connection->isHttp()) {
-            $this->pollTimeout = (float) max(self::LONG_POLL_TIMEOUT, $timeout);
+            $this->pollTimeout = (float) min(self::LONG_POLL_TIMEOUT, $timeout);
         } else {
             $this->pollTimeout = (float) $timeout;
         }
@@ -154,7 +156,6 @@ final class WriteLoop extends Loop
                 unset($this->connection->pendingOutgoing[$k]);
                 $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                 $message->setMsgId($message_id);
-                $this->connection->outgoing_messages[$message_id] = $message;
                 $this->connection->unencrypted_new_outgoing[$message_id] = $message;
 
                 $message->sent();
@@ -318,7 +319,7 @@ final class WriteLoop extends Loop
                     'body' => $message->getSerializedBody(),
                     'seqno' => $message->getSeqNo() ?? $this->connection->generateOutSeqNo($message->contentRelated),
                 ];
-                if ($message->isMethod && $constructor !== 'ping_delay_disconnect' && $constructor !== 'auth.bindTempAuthKey') {
+                if ($message->isMethod && $constructor !== 'auth.bindTempAuthKey') {
                     if (!$this->shared->getTempAuthKey()->isInited()) {
                         if ($constructor === 'help.getConfig' || $constructor === 'upload.getCdnFile') {
                             $this->API->logger(sprintf('Writing client info (also executing %s)...', $constructor), Logger::NOTICE);
@@ -426,6 +427,19 @@ final class WriteLoop extends Loop
                 $count++;
                 unset($body);
             }
+            if (!$count) {
+                $this->API->logger('Adding ping', Logger::ULTRA_VERBOSE);
+                $body = $this->API->getTL()->serializeMethod('ping_delay_disconnect', ['ping_id' => random_bytes(8), 'disconnect_delay' => $this->pingTimeout]);
+                $messages []= [
+                    '_' => 'MTmessage',
+                    'msg_id' => $this->connection->msgIdHandler->generateMessageId(),
+                    'body' => $body,
+                    'seqno' => $this->connection->generateOutSeqNo(false),
+                    'bytes' => \strlen($body),
+                ];
+                $count++;
+                unset($body);
+            }
 
             if ($count > 1 || $has_seq) {
                 $this->API->logger("Wrapping in msg_container ({$count} messages of total size {$total_length}) as encrypted message for DC {$this->datacenter}", Logger::ULTRA_VERBOSE);
@@ -471,10 +485,8 @@ final class WriteLoop extends Loop
 
             foreach ($keys as $key => $message) {
                 unset($this->connection->pendingOutgoing[$key]);
-                $message_id = $message->getMsgId();
-                $this->connection->outgoing_messages[$message_id] = $message;
                 if ($message->hasPromise()) {
-                    $this->connection->new_outgoing[$message_id] = $message;
+                    $this->connection->new_outgoing[$message->getMsgId()] = $message;
                 }
                 $message->sent();
             }

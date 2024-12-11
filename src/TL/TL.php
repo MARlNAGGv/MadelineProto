@@ -1012,11 +1012,11 @@ final class TL implements TLInterface
                         }
                 }
             }
-            if ($x['_'] === 'rpc_result' && $arg['name'] === 'result' && isset($type['connection']->outgoing_messages[$x['req_msg_id']])) {
+            if ($x['_'] === 'rpc_result' && $arg['name'] === 'result' && isset($type['connection']->new_outgoing[$x['req_msg_id']])) {
                 /** @var MTProtoOutgoingMessage */
-                $message = $type['connection']->outgoing_messages[$x['req_msg_id']];
+                $message = $type['connection']->new_outgoing[$x['req_msg_id']];
                 foreach ($this->beforeMethodResponseDeserialization[$message->constructor] ?? [] as $callback) {
-                    $callback($type['connection']->outgoing_messages[$x['req_msg_id']]->constructor);
+                    $callback($message->constructor);
                 }
                 if ($message->subtype) {
                     $arg['subtype'] = $message->subtype;
@@ -1076,10 +1076,11 @@ final class TL implements TLInterface
                 $callback($x);
             }
         } elseif ($x['_'] === 'rpc_result'
-            && isset($type['connection']->outgoing_messages[$x['req_msg_id']])
-            && isset($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor])) {
-            foreach ($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor] as $callback) {
-                $callback($type['connection']->outgoing_messages[$x['req_msg_id']], $x['result']);
+            && isset($type['connection']->new_outgoing[$x['req_msg_id']])
+            && isset($this->afterMethodResponseDeserialization[$type['connection']->new_outgoing[$x['req_msg_id']]->constructor])) {
+            $msg = $type['connection']->new_outgoing[$x['req_msg_id']];
+            foreach ($this->afterMethodResponseDeserialization[$msg->constructor] as $callback) {
+                $callback($msg, $x['result']);
             }
         }
         /** @psalm-suppress InvalidArgument */

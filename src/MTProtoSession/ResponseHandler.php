@@ -97,12 +97,13 @@ trait ResponseHandler
     }
     private function handleAck(MTProtoIncomingMessage $message): void
     {
-        foreach ($message->read()['msg_ids'] as $msg_id) {
+        $message->read();
+        /*foreach ($message->read()['msg_ids'] as $msg_id) {
             // Acknowledge that the server received my message
             if (!isset($this->outgoing_messages[$msg_id])) {
                 $this->API->logger("WARNING: Couldn't find message id ".$msg_id.' in the array of outgoing messages. Maybe try to increase its size?', Logger::WARNING);
             }
-        }
+        }*/
     }
     private function handleFallback(MTProtoIncomingMessage $message): void
     {
@@ -187,12 +188,13 @@ trait ResponseHandler
             }
             $response = $response['result'];
         }
-        if (!isset($this->outgoing_messages[$requestId])) {
+        $arr = $message->unencrypted ? $this->unencrypted_new_outgoing : $this->new_outgoing;
+        if (!isset($arr[$requestId])) {
             $this->API->logger("Got a response $message with message ID $requestId, but there is no request!", Logger::ERROR);
             return;
         }
         /** @var MTProtoOutgoingMessage */
-        $request = $this->outgoing_messages[$requestId];
+        $request = $arr[$requestId];
         if ($request->getState() & MTProtoOutgoingMessage::STATE_REPLIED) {
             $this->API->logger("Already got a response to $request, but there is another reply $message with message ID $requestId!", Logger::FATAL_ERROR);
             return;

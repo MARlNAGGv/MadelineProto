@@ -260,12 +260,10 @@ class MTProtoOutgoingMessage extends MTProtoMessage
             if ($this->unencrypted) {
                 unset(
                     $this->connection->unencrypted_new_outgoing[$this->msgId],
-                    $this->connection->outgoing_messages[$this->msgId],
                 );
             } else {
                 unset(
                     $this->connection->new_outgoing[$this->msgId],
-                    $this->connection->outgoing_messages[$this->msgId],
                 );
             }
         }
