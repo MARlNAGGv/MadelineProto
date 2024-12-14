@@ -5,6 +5,8 @@ use danog\MadelineProto\RPCErrorException;
 use danog\MadelineProto\Settings\Logger as SettingsLogger;
 use danog\MadelineProto\Settings\TLSchema;
 use danog\MadelineProto\TL\TL;
+use Revolt\EventLoop;
+use Webmozart\Assert\Assert;
 
 use function Amp\async;
 
@@ -24,36 +26,33 @@ $logger = new Logger(new SettingsLogger);
 
 set_error_handler(['\danog\MadelineProto\Exception', 'ExceptionErrorHandler']);
 
-if ($argc !== 2) {
-    die("Usage: {$argv[0]} layernumber\n");
-}
 /**
  * Get TL info of layer.
- *
- * @param int $layer Layer number
  *
  * @internal
  *
  * @return void
  */
-function getTL($layer)
+function getTL()
 {
-    $layerFile = __DIR__."/../schemas/TL_telegram_v$layer.tl";
+    $layerFile = glob(__DIR__."/../src/TL_telegram_v*.tl")[0];
     $layer = new TL();
     $layer->init((new TLSchema)->setAPISchema($layerFile)->setSecretSchema(''));
 
     return ['methods' => $layer->getMethods(), 'constructors' => $layer->getConstructors()];
 }
-$layer = getTL($argv[1]);
+$layer = getTL();
 $res = '';
 
 $bot = new \danog\MadelineProto\API('bot.madeline');
 $bot->start();
 $bot->updateSettings((new TLSchema)->setFuzzMode(true));
+Assert::true($bot->isSelfBot(), "bot.madeline is not a bot!");
 
-$user = new \danog\MadelineProto\API('secret.madeline');
+$user = new \danog\MadelineProto\API('user.madeline');
 $user->start();
 $user->updateSettings((new TLSchema)->setFuzzMode(true));
+Assert::true($user->isSelfUser(), "user.madeline is not a user!");
 
 $methods = [];
 foreach ($layer['methods']->by_id as $constructor) {
@@ -65,23 +64,36 @@ foreach ($layer['methods']->by_id as $constructor) {
         || $name === 'account.resetAuthorization'
         || $name === 'account.resetPassword'
         || $name === 'account.updateUsername'
+        || $name === 'photos.updateProfilePhoto'
+        || $name === 'photos.uploadProfilePhoto'
         || !str_contains($name, '.')) {
         continue;
     }
     [$namespace, $method] = explode('.', $name);
 
-    $methods []= async(static function () use ($namespace, $method, $bot): void {
+    $methods["bot $name"]= async(static function () use ($namespace, $method, $bot, $name, &$methods): void {
         try {
             $bot->{$namespace}->{$method}();
         } catch (RPCErrorException) {
         }
+        unset($methods["bot $name"]);
     });
-    $methods []= async(static function () use ($namespace, $method, $user): void {
+    $methods["user $name"] = async(static function () use ($namespace, $method, $user, $name, &$methods): void {
         try {
             $user->{$namespace}->{$method}();
         } catch (RPCErrorException) {
         }
+        unset($methods["user $name"]);
     });
 }
 
-var_dump(array_map('strval', \Amp\Future\awaitAll($methods)[0]));
+EventLoop::repeat(1.0, static function (string $id) use (&$methods): void {
+    if (!$methods) {
+        echo "Done processing!".PHP_EOL;
+        EventLoop::cancel($id);
+        return;
+    }
+    echo "Processing ".implode(", ", array_keys($methods)).PHP_EOL;
+});
+
+\Amp\Future\awaitAll($methods);

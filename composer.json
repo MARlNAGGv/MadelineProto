@@ -115,6 +115,7 @@
             "@docs",
             "@docs-fix",
             "@cs-fix",
+            "@fuzz",
             "@psalm",
             "@test-light"
         ],
@@ -127,6 +128,7 @@
         "cs-fix": "PHP_CS_FIXER_IGNORE_ENV=1 php -d pcre.jit=0 vendor/bin/php-cs-fixer fix -v",
         "psalm": "psalm --no-cache --threads=10",
         "docs": "php tools/build_docs.php",
+        "fuzz": "php tools/fuzzer.php",
         "docs-fix": "tools/fix_docs.sh",
         "paratest": "@php -dzend.assertions=1 ./vendor/bin/paratest -fv",
         "paratest-light": "@php -dzend.assertions=1 ./vendor/bin/paratest -fvc phpunit-light.xml",

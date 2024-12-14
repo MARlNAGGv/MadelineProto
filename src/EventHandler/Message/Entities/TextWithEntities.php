@@ -64,8 +64,8 @@ final class TextWithEntities implements JsonSerializable
             return StrTools::htmlEscape($this->text);
         }
         if ($allowTelegramTags) {
-            return $this->htmlTelegram ??= StrTools::entitiesToHtml($this->text, MessageEntity::fromRawEntities($this->entities), $allowTelegramTags);
+            return $this->htmlTelegram ??= StrTools::entitiesToHtml($this->text, $this->entities, $allowTelegramTags);
         }
-        return $this->html ??= StrTools::entitiesToHtml($this->text, MessageEntity::fromRawEntities($this->entities), $allowTelegramTags);
+        return $this->html ??= StrTools::entitiesToHtml($this->text, $this->entities, $allowTelegramTags);
     }
 }
