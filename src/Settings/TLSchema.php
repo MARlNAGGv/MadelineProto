@@ -42,6 +42,8 @@ final class TLSchema extends SettingsAbstract
     protected string $secretSchema = __DIR__.'/../TL_secret.tl';
     /**
      * @internal Other schemas
+     *
+     * @var array<string, string>
      */
     protected array $other = [];
     /**
@@ -173,6 +175,8 @@ final class TLSchema extends SettingsAbstract
 
     /**
      * Get the value of other.
+     *
+     * @return array<string, string>
      */
     public function getOther(): array
     {
@@ -181,6 +185,8 @@ final class TLSchema extends SettingsAbstract
 
     /**
      * Set the value of other.
+     *
+     * @param array<string, string> $other
      */
     public function setOther(array $other): self
     {

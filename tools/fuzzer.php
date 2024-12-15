@@ -27,32 +27,43 @@ $logger = new Logger(new SettingsLogger);
 set_error_handler(['\danog\MadelineProto\Exception', 'ExceptionErrorHandler']);
 
 /**
+ * @internal
+ */
+function getTLSchema(): TLSchema
+{
+    $layerFile = glob(__DIR__."/../src/TL_telegram_v*.tl")[0];
+    return (new TLSchema)->setAPISchema($layerFile)->setSecretSchema('')->setFuzzMode(true);
+}
+
+/**
  * Get TL info of layer.
  *
  * @internal
  *
  * @return void
  */
-function getTL()
+function getTL(TLSchema $schema)
 {
-    $layerFile = glob(__DIR__."/../src/TL_telegram_v*.tl")[0];
     $layer = new TL();
-    $layer->init((new TLSchema)->setAPISchema($layerFile)->setSecretSchema(''));
+    $layer->init($schema);
 
     return ['methods' => $layer->getMethods(), 'constructors' => $layer->getConstructors()];
 }
-$layer = getTL();
+$schema = getTLSchema();
+$layer = getTL($schema);
 $res = '';
 
 $bot = new \danog\MadelineProto\API('bot.madeline');
 $bot->start();
-$bot->updateSettings((new TLSchema)->setFuzzMode(true));
+$bot->updateSettings($schema);
 Assert::true($bot->isSelfBot(), "bot.madeline is not a bot!");
+$bot->restart();
 
 $user = new \danog\MadelineProto\API('user.madeline');
 $user->start();
-$user->updateSettings((new TLSchema)->setFuzzMode(true));
+$user->updateSettings($schema);
 Assert::true($user->isSelfUser(), "user.madeline is not a user!");
+$user->restart();
 
 $methods = [];
 foreach ($layer['methods']->by_id as $constructor) {

@@ -23,11 +23,15 @@ steps:
     when:
       event:
         - tag
-    secrets:
-      - API_ID
-      - API_HASH
-      - BOT_TOKEN
-      - DEST
+    environment:
+      API_ID:
+        from_secret: API_ID
+      API_HASH:
+        from_secret: API_HASH
+      DEST:
+        from_secret: DEST
+      BOT_TOKEN:
+        from_secret: BOT_TOKEN
     commands:
       - apk add bash
       - tests/test.sh phpunit

@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\TL;
 
+use AssertionError;
 use danog\DialogId\DialogId;
 use danog\MadelineProto\EventHandler\Message\Entities\MessageEntity;
 use danog\MadelineProto\Lang;
@@ -170,132 +171,21 @@ final class TL implements TLInterface
             $filec = file_get_contents(Tools::absolute($file));
             $TL_dict = json_decode($filec, true);
             if ($TL_dict === null) {
-                $TL_dict = ['methods' => [], 'constructors' => []];
-                $type = 'constructors';
-                $layer = null;
-                $tl_file = explode("\n", $filec);
-                $key = 0;
-                $e = null;
-                $class = null;
-                $dparams = [];
-                $lineBuf = '';
-                foreach ($tl_file as $line) {
-                    $line = rtrim($line);
-                    if (preg_match('|^//@|', $line)) {
-                        $list = explode(' @', str_replace('//', ' ', $line));
-                        foreach ($list as $elem) {
-                            if ($elem === '') {
-                                continue;
-                            }
-                            $elem = explode(' ', $elem, 2);
-                            if ($elem[0] === 'class') {
-                                $elem = explode(' ', $elem[1], 2);
-                                $class = $elem[0];
-                                continue;
-                            }
-                            if ($elem[0] === 'description') {
-                                if (!\is_null($class)) {
-                                    $this->tdDescriptions['types'][$class] = $elem[1];
-                                    $class = null;
-                                } else {
-                                    $e = $elem[1];
-                                }
-                                continue;
-                            }
-                            if ($elem[0] === 'param_description') {
-                                $elem[0] = 'description';
-                            }
-                            $dparams[$elem[0]] = $elem[1];
-                        }
-                        continue;
-                    }
-                    $line = preg_replace(['|//.*|', '|^\\s+$|'], '', $line);
-                    if ($line === '') {
-                        continue;
-                    }
-                    if ($line === '---functions---') {
-                        $type = 'methods';
-                        continue;
-                    }
-                    if ($line === '---types---') {
-                        $type = 'constructors';
-                        continue;
-                    }
-                    if (preg_match('|^===(\\d*)===|', $line, $matches)) {
-                        $layer = (int) $matches[1];
-                        continue;
-                    }
-                    if (str_starts_with($line, 'vector#')) {
-                        continue;
-                    }
-                    if (str_contains($line, ' ?= ')) {
-                        continue;
-                    }
-                    $line = preg_replace(['/[(]([\\w\\.]+) ([\\w\\.]+)[)]/', '/\\s+/'], ['$1<$2>', ' '], $line);
-                    if (!str_contains($line, ';')) {
-                        $lineBuf .= $line;
-                        continue;
-                    } elseif ($lineBuf) {
-                        $lineBuf .= $line;
-                        $line = $lineBuf;
-                        $lineBuf = '';
-                    }
-                    $name = preg_replace(['/#.*/', '/\\s.*/'], '', $line);
-                    if (\in_array($name, ['bytes', 'int128', 'int256', 'int512', 'int', 'long', 'double', 'string', 'bytes', 'object', 'function'], true)) {
-                        /*if (!(\in_array($scheme_type, ['ton_api', 'lite_api'], true) && $name === 'bytes')) {
-                              continue;
-                          }*/
-                        continue;
-                    }
-                    if (\in_array($scheme_type, ['ton_api', 'lite_api'], true)) {
-                        $clean = preg_replace(['/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/{/', '/}/'], ['', ' ', '', ' ', ' ', ' ', '', '', '', ''], $line);
-                    } else {
-                        $clean = preg_replace(['/:bytes /', '/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/\\?bytes /', '/{/', '/}/'], [':string ', '', ' ', '', ' ', ' ', ' ', '', '', '?string ', '', ''], $line);
-                    }
-                    $id = hash('crc32b', $clean);
-                    if (preg_match('/^[^\\s]+#([a-f0-9]*)/i', $line, $matches)) {
-                        $nid = str_pad($matches[1], 8, '0', STR_PAD_LEFT);
-                        /*if ($id !== $nid) {
-                            $this->API?->logger?->logger(\sprintf('CRC32 mismatch (%s, %s) for %s', $id, $nid, $line), Logger::ERROR);
-                        }*/
-                        $id = $nid;
-                    }
-                    if (!\is_null($e)) {
-                        $this->tdDescriptions[$type][$name] = ['description' => $e, 'params' => $dparams];
-                        $e = null;
-                        $dparams = [];
-                    }
-                    $TL_dict[$type][$key][$type === 'constructors' ? 'predicate' : 'method'] = $name;
-                    $TL_dict[$type][$key]['id'] = $a = strrev(hex2bin($id));
-                    $TL_dict[$type][$key]['params'] = [];
-                    $TL_dict[$type][$key]['type'] = preg_replace(['/.+\\s+=\\s+/', '/;/'], '', $line);
-                    if ($layer !== null) {
-                        $TL_dict[$type][$key]['layer'] = $layer;
-                    }
-                    if ($name !== 'vector' && $TL_dict[$type][$key]['type'] !== 'Vector t') {
-                        foreach (explode(' ', preg_replace(['/^[^\\s]+\\s/', '/=\\s[^\\s]+/', '/\\s$/'], '', $line)) as $param) {
-                            if ($param === '') {
-                                continue;
-                            }
-                            if ($param[0] === '{') {
-                                continue;
-                            }
-                            if ($param === '#') {
-                                continue;
-                            }
-                            $explode = explode(':', $param);
-                            $TL_dict[$type][$key]['params'][] = ['name' => $explode[0], 'type' => $explode[1]];
-                        }
-                    }
-                    $key++;
+                $TL_dict = $this->toJson($filec, $scheme_type);
+            }
+            foreach ($TL_dict['constructors'] as $key => $value) {
+                $id = $TL_dict['constructors'][$key]['id'];
+                if (!is_numeric($id)) {
+                    throw new AssertionError("ID isn't numeric!");
                 }
-            } else {
-                foreach ($TL_dict['constructors'] as $key => $value) {
-                    $TL_dict['constructors'][$key]['id'] = Tools::packSignedInt($TL_dict['constructors'][$key]['id']);
+                $TL_dict['constructors'][$key]['id'] = Tools::packSignedInt((int) $id);
+            }
+            foreach ($TL_dict['methods'] as $key => $value) {
+                $id = $TL_dict['methods'][$key]['id'];
+                if (!is_numeric($id)) {
+                    throw new AssertionError("ID isn't numeric!");
                 }
-                foreach ($TL_dict['methods'] as $key => $value) {
-                    $TL_dict['methods'][$key]['id'] = Tools::packSignedInt($TL_dict['methods'][$key]['id']);
-                }
+                $TL_dict['methods'][$key]['id'] = Tools::packSignedInt((int) $id);
             }
 
             if (empty($TL_dict) || empty($TL_dict['constructors']) || !isset($TL_dict['methods'])) {
@@ -342,6 +232,139 @@ final class TL implements TLInterface
             }
         }
         $files->upgrade();
+    }
+    /**
+     * @return array{
+     *      constructors: list<array{id: numeric-string, predicate: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>,
+     *      methods: list<array{id: numeric-string, method: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>
+     * }
+     */
+    public function toJson(string $filec, ?string $scheme_type = null): array
+    {
+        $TL_dict = ['constructors' => [], 'methods' => []];
+        $type = 'constructors';
+        $layer = null;
+        $tl_file = explode("\n", $filec);
+        $key = 0;
+        $e = null;
+        $class = null;
+        $dparams = [];
+        $lineBuf = '';
+        foreach ($tl_file as $line) {
+            $line = rtrim($line);
+            if (preg_match('|^//@|', $line)) {
+                $list = explode(' @', str_replace('//', ' ', $line));
+                foreach ($list as $elem) {
+                    if ($elem === '') {
+                        continue;
+                    }
+                    $elem = explode(' ', $elem, 2);
+                    if ($elem[0] === 'class') {
+                        $elem = explode(' ', $elem[1], 2);
+                        $class = $elem[0];
+                        continue;
+                    }
+                    if ($elem[0] === 'description') {
+                        if (!\is_null($class)) {
+                            $this->tdDescriptions['types'][$class] = $elem[1];
+                            $class = null;
+                        } else {
+                            $e = $elem[1];
+                        }
+                        continue;
+                    }
+                    if ($elem[0] === 'param_description') {
+                        $elem[0] = 'description';
+                    }
+                    $dparams[$elem[0]] = $elem[1];
+                }
+                continue;
+            }
+            $line = preg_replace(['|//.*|', '|^\\s+$|'], '', $line);
+            if ($line === '') {
+                continue;
+            }
+            if ($line === '---functions---') {
+                $type = 'methods';
+                continue;
+            }
+            if ($line === '---types---') {
+                $type = 'constructors';
+                continue;
+            }
+            if (preg_match('|^===(\\d*)===|', $line, $matches)) {
+                $layer = (int) $matches[1];
+                continue;
+            }
+            if (str_starts_with($line, 'vector#')) {
+                $TL_dict[$type][]= [
+                    "id" => "481674261",
+                    "predicate" => "vector",
+                    "params" => [],
+                    "type" => "Vector t",
+                ];
+                continue;
+            }
+            if (str_contains($line, ' ?= ')) {
+                continue;
+            }
+            $line = preg_replace(['/[(]([\\w\\.]+) ([\\w\\.]+)[)]/', '/\\s+/'], ['$1<$2>', ' '], $line);
+            if (!str_contains($line, ';')) {
+                $lineBuf .= $line;
+                continue;
+            } elseif ($lineBuf) {
+                $lineBuf .= $line;
+                $line = $lineBuf;
+                $lineBuf = '';
+            }
+            $name = preg_replace(['/#.*/', '/\\s.*/'], '', $line);
+            if (\in_array($name, ['bytes', 'int128', 'int256', 'int512', 'int', 'long', 'double', 'string', 'bytes', 'object', 'function'], true)) {
+                continue;
+            }
+            if (\in_array($scheme_type, ['ton_api', 'lite_api'], true)) {
+                $clean = preg_replace(['/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/{/', '/}/'], ['', ' ', '', ' ', ' ', ' ', '', '', '', ''], $line);
+            } else {
+                $clean = preg_replace(['/:bytes /', '/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/\\?bytes /', '/{/', '/}/'], [':string ', '', ' ', '', ' ', ' ', ' ', '', '', '?string ', '', ''], $line);
+            }
+            $id = hash('crc32b', $clean);
+            if (preg_match('/^[^\\s]+#([a-f0-9]*)/i', $line, $matches)) {
+                $nid = str_pad($matches[1], 8, '0', STR_PAD_LEFT);
+                /*if ($id !== $nid) {
+                    $this->API?->logger?->logger(\sprintf('CRC32 mismatch (%s, %s) for %s', $id, $nid, $line), Logger::ERROR);
+                }*/
+                $id = $nid;
+            }
+            if (!\is_null($e)) {
+                $this->tdDescriptions[$type][$name] = ['description' => $e, 'params' => $dparams];
+                $e = null;
+                $dparams = [];
+            }
+            $key = \count($TL_dict[$type]);
+            $TL_dict[$type][$key]['id'] = (string) Tools::unpackSignedInt(strrev(hex2bin($id)));
+            $TL_dict[$type][$key][$type === 'constructors' ? 'predicate' : 'method'] = $name;
+            $TL_dict[$type][$key]['params'] = [];
+            $TL_dict[$type][$key]['type'] = preg_replace(['/.+\\s+=\\s+/', '/;/'], '', $line);
+            if ($layer !== null) {
+                $TL_dict[$type][$key]['layer'] = $layer;
+            }
+            if ($name !== 'vector' && $TL_dict[$type][$key]['type'] !== 'Vector t') {
+                foreach (explode(' ', preg_replace(['/^[^\\s]+\\s/', '/=\\s[^\\s]+/', '/\\s$/'], '', $line)) as $param) {
+                    if ($param === '') {
+                        continue;
+                    }
+                    if ($param[0] === '{') {
+                        continue;
+                    }
+                    if ($param === '#') {
+                        continue;
+                    }
+                    $explode = explode(':', $param);
+                    $TL_dict[$type][$key]['params'][] = ['name' => $explode[0], 'type' => $explode[1]];
+                }
+            }
+        }
+
+        return $TL_dict;
     }
     /**
      * Get TL namespaces.

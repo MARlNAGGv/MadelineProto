@@ -13,7 +13,11 @@ clone:
 steps:
   variants:
     image: docker:cli
-    secrets: [docker_username, docker_password]
+    environment:
+      DOCKER_USERNAME:
+        from_secret: docker_username
+      DOCKER_PASSWORD:
+        from_secret: docker_password
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:

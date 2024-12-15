@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<files psalm-version="dev-master@79ab7e26d49380a70780b22cd4eaa7e9022c77ad">
+<files psalm-version="dev-master@a9b529116889c82f675f49e869d78f225cba2cab">
   <file src="src/API.php">
     <ArgumentTypeCoercion>
       <code><![CDATA[$settings]]></code>
@@ -1573,10 +1573,6 @@
     </MixedOperand>
   </file>
   <file src="src/EventHandler/Message/Entities/TextWithEntities.php">
-    <InvalidArgument>
-      <code><![CDATA[$this->entities]]></code>
-      <code><![CDATA[$this->entities]]></code>
-    </InvalidArgument>
     <MixedAssignment>
       <code><![CDATA[$res[$prop->getName()]]]></code>
     </MixedAssignment>
@@ -7049,6 +7045,13 @@
       <code><![CDATA[\is_resource($stream)]]></code>
       <code><![CDATA[\is_resource($stream)]]></code>
     </DocblockTypeContradiction>
+    <EmptyArrayAccess>
+      <code><![CDATA[$this->tdDescriptions['methods'][$name]]]></code>
+      <code><![CDATA[$this->tdDescriptions['methods'][$name]]]></code>
+    </EmptyArrayAccess>
+    <LessSpecificReturnStatement>
+      <code><![CDATA[$TL_dict]]></code>
+    </LessSpecificReturnStatement>
     <MissingClosureParamType>
       <code><![CDATA[$arg]]></code>
     </MissingClosureParamType>
@@ -7059,8 +7062,6 @@
       <code><![CDATA[serializeParams]]></code>
     </MissingReturnType>
     <MixedArgument>
-      <code><![CDATA[$TL_dict['constructors'][$key]['id']]]></code>
-      <code><![CDATA[$TL_dict['methods'][$key]['id']]]></code>
       <code><![CDATA[$arg]]></code>
       <code><![CDATA[$arguments]]></code>
       <code><![CDATA[$arguments['cancellation'] ?? null]]></code>
@@ -7074,8 +7075,6 @@
       <code><![CDATA[$current_argument]]></code>
       <code><![CDATA[$elem]]></code>
       <code><![CDATA[$elem]]></code>
-      <code><![CDATA[$file]]></code>
-      <code><![CDATA[$file]]></code>
       <code><![CDATA[$long_len]]></code>
       <code><![CDATA[$name]]></code>
       <code><![CDATA[$object]]></code>
@@ -7089,6 +7088,7 @@
       <code><![CDATA[$object['bytes']]]></code>
       <code><![CDATA[$object['bytes']]]></code>
       <code><![CDATA[$pair]]></code>
+      <code><![CDATA[$param]]></code>
       <code><![CDATA[$predicate]]></code>
       <code><![CDATA[$tl]]></code>
       <code><![CDATA[$tl['layer'] ?? -1]]></code>
@@ -7123,20 +7123,12 @@
       <code><![CDATA[$id]]></code>
       <code><![CDATA[$k]]></code>
       <code><![CDATA[$k]]></code>
-      <code><![CDATA[$scheme_type]]></code>
-      <code><![CDATA[$scheme_type]]></code>
     </MixedArgumentTypeCoercion>
     <MixedArrayAccess>
       <code><![CDATA[$TL_dict['constructors']]]></code>
-      <code><![CDATA[$TL_dict['constructors']]]></code>
-      <code><![CDATA[$TL_dict['constructors']]]></code>
-      <code><![CDATA[$TL_dict['constructors'][$key]]]></code>
       <code><![CDATA[$TL_dict['constructors'][$key]]]></code>
       <code><![CDATA[$TL_dict['constructors'][$key]['id']]]></code>
       <code><![CDATA[$TL_dict['methods']]]></code>
-      <code><![CDATA[$TL_dict['methods']]]></code>
-      <code><![CDATA[$TL_dict['methods']]]></code>
-      <code><![CDATA[$TL_dict['methods'][$key]]]></code>
       <code><![CDATA[$TL_dict['methods'][$key]]]></code>
       <code><![CDATA[$TL_dict['methods'][$key]['id']]]></code>
       <code><![CDATA[$arg['flag']]]></code>
@@ -7182,6 +7174,7 @@
       <code><![CDATA[$this->constructors->findByPredicate('vector')['id']]]></code>
       <code><![CDATA[$this->constructors->findByPredicate((bool) $object ? 'boolTrue' : 'boolFalse')['id']]]></code>
       <code><![CDATA[$this->constructors->findByType($type)['predicate']]]></code>
+      <code><![CDATA[$this->tdDescriptions['methods'][$name]['params']]]></code>
       <code><![CDATA[$tl['id']]]></code>
       <code><![CDATA[$type]]></code>
       <code><![CDATA[$type['connection']->outgoing_messages[$x['req_msg_id']]]]></code>
@@ -7207,6 +7200,8 @@
       <code><![CDATA[$constructorData['subtype']]]></code>
       <code><![CDATA[$constructorData['type']]]></code>
       <code><![CDATA[$object['_']]]></code>
+      <code><![CDATA[$this->tdDescriptions[$type][$name]]]></code>
+      <code><![CDATA[$this->tdDescriptions['types'][$class]]]></code>
       <code><![CDATA[$x['reply_markup']['rows'][$key]]]></code>
       <code><![CDATA[$x['reply_markup']['rows'][$key]['buttons']]]></code>
       <code><![CDATA[$x['reply_markup']['rows'][$key]['buttons'][$bkey]]]></code>
@@ -7214,8 +7209,6 @@
     <MixedArrayOffset>
       <code><![CDATA[$TL_dict['constructors'][$key]]]></code>
       <code><![CDATA[$TL_dict['constructors'][$key]]]></code>
-      <code><![CDATA[$TL_dict['constructors'][$key]]]></code>
-      <code><![CDATA[$TL_dict['methods'][$key]]]></code>
       <code><![CDATA[$TL_dict['methods'][$key]]]></code>
       <code><![CDATA[$TL_dict['methods'][$key]]]></code>
       <code><![CDATA[$arguments[$current_argument['flag']]]]></code>
@@ -7247,6 +7240,7 @@
       <code><![CDATA[$this->tdDescriptions['constructors'][$name]]]></code>
       <code><![CDATA[$this->tdDescriptions['constructors'][$name]]]></code>
       <code><![CDATA[$this->tdDescriptions['constructors'][$name]]]></code>
+      <code><![CDATA[$this->tdDescriptions['constructors'][$name]['params'][$k]]]></code>
       <code><![CDATA[$this->tdDescriptions['methods'][$name]]]></code>
       <code><![CDATA[$this->tdDescriptions['methods'][$name]]]></code>
       <code><![CDATA[$this->typeMismatch[$type['type']]]]></code>
@@ -7298,9 +7292,10 @@
       <code><![CDATA[$data]]></code>
       <code><![CDATA[$elem]]></code>
       <code><![CDATA[$elem]]></code>
-      <code><![CDATA[$file]]></code>
       <code><![CDATA[$id]]></code>
       <code><![CDATA[$id]]></code>
+      <code><![CDATA[$id]]></code>
+      <code><![CDATA[$k]]></code>
       <code><![CDATA[$key]]></code>
       <code><![CDATA[$key]]></code>
       <code><![CDATA[$key]]></code>
@@ -7314,6 +7309,7 @@
       <code><![CDATA[$object['_']]]></code>
       <code><![CDATA[$pair]]></code>
       <code><![CDATA[$pair]]></code>
+      <code><![CDATA[$param]]></code>
       <code><![CDATA[$predicate]]></code>
       <code><![CDATA[$res[$pair['key']]]]></code>
       <code><![CDATA[$result []]]></code>
@@ -7384,6 +7380,12 @@
       <code><![CDATA[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor]]></code>
       <code><![CDATA[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor]]></code>
     </MixedPropertyFetch>
+    <MoreSpecificReturnType>
+      <code><![CDATA[array{
+     *      constructors: list<array{id: numeric-string, predicate: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>,
+     *      methods: list<array{id: numeric-string, method: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>
+     * }]]></code>
+    </MoreSpecificReturnType>
     <PossiblyFalseArgument>
       <code><![CDATA[$value]]></code>
     </PossiblyFalseArgument>
