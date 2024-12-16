@@ -101,8 +101,6 @@ madeline.php
 composer.lock
 b.php
 telegram-cli*
-src/Fuzzer.php
-fuzzer.php
 tests/500mb
 *.save
 *.save.1
@@ -150,3 +148,11 @@ config.json
 /Caddyfile
 /tt.php
 /changelog
+*.mp4
+rector.php
+
+# Temp
+train/
+dataset_info.json
+madeline_*.json
+pre.json

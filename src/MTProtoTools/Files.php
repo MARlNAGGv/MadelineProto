@@ -365,17 +365,16 @@ trait Files
                         $d->complete();
                         return;
                     } catch (FloodPremiumWaitError $e) {
-                        $this->logger("Got {$e->rpc} while uploading $part_num: {$datacenter}, waiting and retrying...");
+                        $this->logger("Got {$e->rpc} while uploading part $part_num: {$datacenter}, waiting and retrying...");
                         $floodWaitError = $e;
                         $writePromise = async($writeCb);
                     } catch (FileRedirect $e) {
                         $datacenter = $e->dc;
-                        $this->logger("Got redirect while uploading $part_num: {$datacenter}");
+                        $this->logger("Got redirect while uploading part $part_num: {$datacenter}");
                         $writePromise = async($writeCb);
                     } catch (Throwable $e) {
                         $cancellation?->throwIfRequested();
-                        $this->logger("Got exception while uploading $part_num: {$e}");
-                        $d->error($e);
+                        $this->logger("Got exception while uploading part $part_num: {$e}");
                         $writePromise = async($writeCb);
                     }
                 } while (true);
