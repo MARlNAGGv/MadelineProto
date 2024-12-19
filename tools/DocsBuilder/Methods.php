@@ -87,7 +87,10 @@ trait Methods
             }
             $params = '';
             foreach ($data['params'] as $param) {
-                if (\in_array($param['name'], ['flags', 'flags2', 'random_id', 'random_bytes'], true)) {
+                if (\in_array($param['name'], ['flags', 'flags2', 'random_bytes'], true)) {
+                    continue;
+                }
+                if ($param['name'] === 'random_id' && stripos($method, 'sponsored') === false) {
                     continue;
                 }
                 if ($param['name'] === 'data' && $type === 'messages_SentEncryptedMessage' && !isset($this->settings['td'])) {
@@ -141,7 +144,10 @@ trait Methods
             $hasreplymarkup = false;
             $hasmessage = false;
             foreach ($data['params'] as $param) {
-                if (\in_array($param['name'], ['flags', 'flags2', 'random_id', 'random_bytes'], true)) {
+                if (\in_array($param['name'], ['flags', 'flags2', 'random_bytes'], true)) {
+                    continue;
+                }
+                if ($param['name'] === 'random_id' && stripos($method, 'sponsored') === false) {
                     continue;
                 }
                 if ($param['name'] === 'data' && $type === 'messages_SentEncryptedMessage' && !isset($this->settings['td'])) {

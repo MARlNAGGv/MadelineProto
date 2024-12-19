@@ -66,7 +66,10 @@ trait Constructors
                 if ($param['type'] === 'strlong') {
                     $param['type'] = 'long';
                 }
-                if (\in_array($param['name'], ['flags', 'flags2', 'random_id', 'random_bytes'], true)) {
+                if (\in_array($param['name'], ['flags', 'flags2', 'random_bytes'], true)) {
+                    continue;
+                }
+                if ($param['name'] === 'random_id' && stripos($constructor, 'sponsored') === false) {
                     continue;
                 }
                 if ($param['name'] === 'peer' && $param['type'] === 'Peer') {
@@ -121,7 +124,10 @@ trait Constructors
                 if ($param['type'] === 'strlong') {
                     $param['type'] = 'long';
                 }
-                if (\in_array($param['name'], ['flags', 'flags2', 'random_id', 'random_bytes'], true)) {
+                if (\in_array($param['name'], ['flags', 'flags2', 'random_bytes'], true)) {
+                    continue;
+                }
+                if ($param['name'] === 'random_id' && stripos($constructor, 'sponsored') === false) {
                     continue;
                 }
                 if ($type === 'EncryptedMessage' && $param['name'] === 'bytes' && !isset($this->settings['td'])) {

@@ -21,6 +21,9 @@ declare(strict_types=1);
 namespace danog\MadelineProto;
 
 use Amp\DeferredFuture;
+use Amp\File\Driver\BlockingFilesystemDriver;
+use Amp\File\Driver\EioFilesystemDriver;
+use Amp\File\Driver\UvFilesystemDriver;
 use Amp\SignalException;
 use danog\MadelineProto\TL\Conversion\Extension;
 use phpseclib3\Math\BigInteger;
@@ -36,6 +39,8 @@ use const PHP_SAPI;
 use const SIG_DFL;
 use const SIGINT;
 use const SIGTERM;
+
+use function Amp\File\filesystem;
 use function Amp\Log\hasColorSupport;
 use function function_exists;
 
@@ -227,6 +232,18 @@ final class Magic
             \define('AMP_WORKER', 1);
         }
         if (!self::$initedLight) {
+            // Setup file driver
+            $driver = EventLoop::getDriver();
+
+            if (UvFilesystemDriver::isSupported($driver)) {
+                $driver = new UvFilesystemDriver($driver);
+            } elseif (EioFilesystemDriver::isSupported()) {
+                $driver = new EioFilesystemDriver($driver);
+            } else {
+                $driver = new BlockingFilesystemDriver();
+            }
+            filesystem($driver);
+
             // Setup error reporting
             Shutdown::init();
             set_error_handler(Exception::exceptionErrorHandler(...));

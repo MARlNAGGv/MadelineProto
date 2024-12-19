@@ -950,8 +950,10 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             'madeline_version' => API::RELEASE,
         ]);
         $endpoint = $this->getSettings()->getMetrics()->getMetricsBindTo();
+        $enablePrometheus = $this->getSettings()->getMetrics()->getEnablePrometheusCollection();
+        $enableMemprof = $this->getSettings()->getMetrics()->getEnableMemprofCollection();
         $this->promServer?->stop();
-        if ($endpoint === null) {
+        if ($endpoint === null || (!$enablePrometheus && !$enableMemprof)) {
             $this->promServer = null;
         } else {
             /** @psalm-suppress ImpureMethodCall */

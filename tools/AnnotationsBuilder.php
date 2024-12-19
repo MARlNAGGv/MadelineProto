@@ -284,7 +284,10 @@ final class Blacklist {
     {
         $newParams = [];
         foreach ($params as $param) {
-            if (\in_array($param['name'], ['flags', 'flags2', 'random_id', 'random_bytes'], true)) {
+            if (\in_array($param['name'], ['flags', 'flags2', 'random_bytes'], true)) {
+                continue;
+            }
+            if ($param['name'] === 'random_id' && stripos($method ?? $type, 'sponsored') === false) {
                 continue;
             }
             if ($method) {
