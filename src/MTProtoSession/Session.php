@@ -21,10 +21,14 @@ declare(strict_types=1);
 namespace danog\MadelineProto\MTProtoSession;
 
 use Amp\Sync\LocalKeyedMutex;
+use danog\BetterPrometheus\BetterCounter;
+use danog\BetterPrometheus\BetterGauge;
+use danog\BetterPrometheus\BetterHistogram;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto\MTProtoIncomingMessage;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\Tools;
+use SplQueue;
 
 /**
  * Manages MTProto session-specific data.
@@ -39,6 +43,16 @@ trait Session
     use SeqNoHandler;
     use CallHandler;
     use Reliable;
+    public ?BetterGauge $pendingOutgoingGauge = null;
+    public ?BetterGauge $inFlightGauge = null;
+    public ?BetterCounter $incomingCtr = null;
+    public ?BetterCounter $outgoingCtr = null;
+    public ?BetterCounter $incomingBytesCtr = null;
+    public ?BetterCounter $outgoingBytesCtr = null;
+
+    public ?BetterHistogram $requestLatencies = null;
+
+    public ?BetterCounter $requestResponse = null;
     /**
      * Incoming message array.
      *
@@ -54,9 +68,9 @@ trait Session
     /**
      * New incoming message ID array.
      *
-     * @var array<MTProtoIncomingMessage>
+     * @var SplQueue<MTProtoIncomingMessage>
      */
-    public array $new_incoming = [];
+    public SplQueue $new_incoming;
     /**
      * New outgoing message array.
      *
@@ -98,13 +112,18 @@ trait Session
     /**
      * Reset MTProto session.
      */
-    public function resetSession(): void
+    public function resetSession(string $why): void
     {
-        $this->API->logger("Resetting session in DC {$this->datacenterId}...", Logger::WARNING);
+        $this->API->logger("Resetting session in DC {$this->datacenterId} due to $why...", Logger::WARNING);
         $this->session_id = Tools::random(8);
         $this->session_in_seq_no = 0;
         $this->session_out_seq_no = 0;
         $this->msgIdHandler ??= new MsgIdHandler($this);
+        if (!isset($this->new_incoming)) {
+            $q = new SplQueue;
+            $q->setIteratorMode(SplQueue::IT_MODE_DELETE);
+            $this->new_incoming = $q;
+        }
         foreach ($this->outgoing_messages as &$msg) {
             if ($msg->hasMsgId()) {
                 $msg->setMsgId(null);
@@ -141,7 +160,7 @@ trait Session
             if ($message->canGarbageCollect()) {
                 $count++;
             } else {
-                $ago = time() - $message->getSent();
+                $ago = (hrtime(true) - $message->getSent()) / 1_000_000_000;
                 if ($ago > 2) {
                     $this->API->logger("Can't garbage collect $message in DC {$this->datacenter}, no response has been received or it wasn't yet handled!", Logger::VERBOSE);
                 }
@@ -153,14 +172,50 @@ trait Session
         if ($count+$total) {
             $this->API->logger("Garbage collected $count outgoing messages in DC {$this->datacenter}, $total left", Logger::VERBOSE);
         }
+
+        $new_outgoing = [];
+        foreach ($this->new_outgoing as $key => $message) {
+            $new_outgoing[$key] = $message;
+        }
+        $this->new_outgoing = $new_outgoing;
     }
     /**
      * Create MTProto session if needed.
      */
     public function createSession(): void
     {
+        $labels = ['datacenter' => (string) $this->datacenter, 'connection' => (string) $this->id];
+        $this->pendingOutgoingGauge = $this->API->getPromGauge("MadelineProto", "pending_outgoing_mtproto_messages_count", "Number of not-yet sent outgoing MTProto messages", $labels);
+        $this->inFlightGauge = $this->API->getPromGauge("MadelineProto", "inflight_requests_count", "Number of in-flight requests", $labels);
+        $this->incomingCtr = $this->API->getPromCounter("MadelineProto", "incoming_mtproto_messages_count", "Number of received MTProto messages", $labels);
+        $this->outgoingCtr = $this->API->getPromCounter("MadelineProto", "outgoing_mtproto_messages_count", "Number of sent MTProto messages", $labels);
+        $this->incomingBytesCtr = $this->API->getPromCounter("MadelineProto", "incoming_bytes_count", "Number of received bytes", $labels);
+        $this->outgoingBytesCtr = $this->API->getPromCounter("MadelineProto", "outgoing_bytes_count", "Number of sent bytes", $labels);
+        $this->requestResponse = $this->API->getPromCounter("MadelineProto", "request_responses_count", "Received RPC error or success status of requests by method.", $labels);
+        $this->requestLatencies = $this->API->getPromHistogram(
+            "MadelineProto",
+            "request_latencies",
+            "Successful request latency in nanoseconds by method",
+            $labels,
+            [
+                5_000_000,
+                10_000_000,
+                25_000_000,
+                50_000_000,
+                75_000_000,
+                100_000_000,
+                250_000_000,
+                500_000_000,
+                750_000_000,
+                1000_000_000,
+                2500_000_000,
+                5000_000_000,
+                7500_000_000,
+                10000_000_000,
+            ]
+        );
         if ($this->session_id === null) {
-            $this->resetSession();
+            $this->resetSession("creating initial session");
         }
         $this->abstractionQueueMutex ??= new LocalKeyedMutex;
     }

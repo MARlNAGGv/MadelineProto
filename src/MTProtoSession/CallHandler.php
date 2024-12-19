@@ -45,7 +45,7 @@ trait CallHandler
     /**
      * Recall method.
      */
-    public function methodRecall(int $message_id, bool $postpone = false, ?int $datacenter = null): void
+    public function methodRecall(int $message_id, ?int $datacenter = null): void
     {
         if ($datacenter === $this->datacenter) {
             $datacenter = null;
@@ -65,7 +65,7 @@ trait CallHandler
                     $message->setSeqNo(null);
                     EventLoop::queue(function () use ($datacenter, $message): void {
                         $this->API->datacenter->waitGetConnection($datacenter)
-                            ->sendMessage($message, false);
+                            ->sendMessage($message);
                     });
                 } else {
                     /** @var MTProtoOutgoingMessage */
@@ -73,17 +73,10 @@ trait CallHandler
                     if (!$message->hasSeqNo()) {
                         $this->gotResponseForOutgoingMessage($message);
                     }
-                    EventLoop::queue($this->sendMessage(...), $message, false);
+                    EventLoop::queue($this->sendMessage(...), $message);
                 }
             } else {
                 $this->API->logger('Could not resend '.($this->outgoing_messages[$message_id] ?? $message_id));
-            }
-        }
-        if (!$postpone) {
-            if ($datacenter) {
-                $this->API->datacenter->getDataCenterConnection($datacenter)->flush();
-            } else {
-                $this->flush();
             }
         }
     }
@@ -119,7 +112,6 @@ trait CallHandler
         }
 
         if (isset($args['message']) && \is_string($args['message']) && mb_strlen($args['message'], 'UTF-8') > ($this->API->getConfig())['message_length_max'] && mb_strlen($this->API->parseMode($args)['message'], 'UTF-8') > ($this->API->getConfig())['message_length_max']) {
-            $postpone = $args['postpone'] ?? false;
             $peer = $args['peer'];
             $args = $this->API->splitToChunks($args);
             $promises = [];
@@ -128,15 +120,11 @@ trait CallHandler
             $promises = [];
             foreach ($args as $sub) {
                 $sub['queueId'] = $queueId;
-                $sub['postpone'] = true;
                 $sub = $this->API->botAPIToMTProto($sub);
                 $this->methodAbstractions($method, $sub);
                 $promises[] = async($this->methodCallAsyncWrite(...), $method, $sub);
             }
 
-            if (!$postpone) {
-                $this->flush();
-            }
             return new WrappedFuture(async(static fn () => array_map(
                 static fn (WrappedFuture $f) => $f->await(),
                 await($promises)
@@ -176,6 +164,7 @@ trait CallHandler
             $encrypted = true;
         }
         $message = new MTProtoOutgoingMessage(
+            connection: $this,
             body: $args,
             constructor: $method,
             type: $methodInfo['type'],
@@ -187,6 +176,8 @@ trait CallHandler
             floodWaitLimit: $args['floodWaitLimit'] ?? null,
             resultDeferred: $response,
             cancellation: $cancellation,
+            takeoutId: $args['takeoutId'] ?? null,
+            businessConnectionId: $args['businessConnectionId'] ?? null,
         );
         if ($queueId !== null) {
             $this->callQueue[$queueId] = $message;
@@ -195,7 +186,7 @@ trait CallHandler
         if (isset($args['madelineMsgId'])) {
             $message->setMsgId($args['madelineMsgId']);
         }
-        $this->sendMessage($message, !($args['postpone'] ?? false));
+        $this->sendMessage($message);
         $this->checker->resume();
         return new WrappedFuture($response->getFuture());
     }
@@ -205,10 +196,11 @@ trait CallHandler
      * @param string $object Object name
      * @param array  $args   Arguments
      */
-    public function objectCall(string $object, array $args, bool $flush = true, ?DeferredFuture $promise = null): void
+    public function objectCall(string $object, array $args, ?DeferredFuture $promise = null): void
     {
         $this->sendMessage(
             new MTProtoOutgoingMessage(
+                connection: $this,
                 body: $args,
                 constructor: $object,
                 type: '',
@@ -216,7 +208,6 @@ trait CallHandler
                 unencrypted: false,
                 resultDeferred: $promise
             ),
-            $flush
         );
     }
 }

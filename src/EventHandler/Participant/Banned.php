@@ -18,8 +18,6 @@ namespace danog\MadelineProto\EventHandler\Participant;
 
 use danog\MadelineProto\EventHandler\Participant;
 use danog\MadelineProto\EventHandler\Participant\Rights\Banned as BannedRights;
-use danog\MadelineProto\Ipc\Client;
-use danog\MadelineProto\MTProto;
 
 /**
  * Banned/kicked user.
@@ -42,14 +40,12 @@ final class Banned extends Participant
     public readonly BannedRights $bannedRights;
 
     /** @internal */
-    public function __construct(
-        MTProto|Client $API,
-        array $rawParticipant
-    ) {
+    public function __construct(array $rawParticipant)
+    {
         $this->left = $rawParticipant['left'];
-        $this->peer = $API->getIdInternal($rawParticipant['peer']);
         $this->kickedBy = $rawParticipant['kicked_by'];
         $this->date = $rawParticipant['date'];
         $this->bannedRights = new BannedRights($rawParticipant['banned_rights']);
+        $this->peer = $rawParticipant['peer'];
     }
 }

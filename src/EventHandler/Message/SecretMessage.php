@@ -27,9 +27,9 @@ use danog\MadelineProto\MTProto;
 class SecretMessage extends AbstractPrivateMessage
 {
     /** @internal */
-    public function __construct(MTProto $API, array $rawMessage, array $info)
+    public function __construct(MTProto $API, array $rawMessage, array $info, bool $scheduled)
     {
-        parent::__construct($API, $rawMessage, $info);
+        parent::__construct($API, $rawMessage, $info, $scheduled);
     }
 
     public function getReply(string $class = SecretMessage::class): ?SecretMessage
@@ -48,11 +48,33 @@ class SecretMessage extends AbstractPrivateMessage
         }
         $message = $this->getClient()->getSecretMessage(
             chatId: $this->chatId,
-            randomId: $this->id
+            randomId: $this->replyToMsgId
         );
         $this->replyCache = $message;
         $this->replyCached = true;
         return $this->replyCache;
+    }
+
+    /**
+     * Delete the message.
+     *
+     * @param boolean $revoke Whether to delete the message for all participants of the chat.
+     */
+    public function delete(bool $revoke = true): void
+    {
+        if (!$revoke) {
+            return;
+        }
+        $this->getClient()->methodCallAsyncRead(
+            'messages.sendEncryptedService',
+            [
+                'peer' => $this->chatId,
+                'message' => [
+                    '_' => 'decryptedMessageService',
+                    'action' => ['_' => 'decryptedMessageActionDeleteMessages', 'random_ids' => [$this->id]],
+                ],
+            ]
+        );
     }
 
     public function screenShot(): DialogScreenshotTaken

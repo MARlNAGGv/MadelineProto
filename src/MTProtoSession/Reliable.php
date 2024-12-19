@@ -39,7 +39,7 @@ trait Reliable
         if (isset($this->incoming_messages[$content['answer_msg_id']])) {
             $this->ackIncomingMessage($this->incoming_messages[$content['answer_msg_id']]);
         } else {
-            EventLoop::queue($this->objectCall(...), 'msg_resend_req', ['msg_ids' => [$content['answer_msg_id']]], false);
+            EventLoop::queue($this->objectCall(...), 'msg_resend_req', ['msg_ids' => [$content['answer_msg_id']]]);
         }
     }
     /**
@@ -64,7 +64,7 @@ trait Reliable
         }
         if ($ok) {
             foreach ($content['msg_ids'] as $msg_id) {
-                $this->methodRecall(message_id: $msg_id, postpone: true);
+                $this->methodRecall($msg_id);
             }
         } else {
             $this->sendMsgsStateInfo($content['msg_ids'], $current_msg_id);
@@ -86,10 +86,6 @@ trait Reliable
         foreach ($content['msg_ids'] as $key => $msg_id) {
             $info = \ord($content['info'][$key]);
             $status = 'Status for message id '.$msg_id.': ';
-            /*if ($info & 4) {
-             *$this->gotResponseForOutgoingMessageId($msg_id);
-             *}
-             */
             foreach (MTProto::MSGS_INFO_FLAGS as $flag => $description) {
                 if (($info & $flag) !== 0) {
                     $status .= $description;
@@ -128,6 +124,6 @@ trait Reliable
             }
             $info .= \chr($cur_info);
         }
-        EventLoop::queue($this->objectCall(...), 'msgs_state_info', ['req_msg_id' => $req_msg_id, 'info' => $info], false);
+        EventLoop::queue($this->objectCall(...), 'msgs_state_info', ['req_msg_id' => $req_msg_id, 'info' => $info]);
     }
 }

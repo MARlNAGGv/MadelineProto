@@ -21,10 +21,14 @@ namespace danog\MadelineProto;
 use Amp\ByteStream\BufferedReader;
 use Amp\ByteStream\ReadableBuffer;
 use Amp\ByteStream\ReadableStream;
+use Amp\ByteStream\WritableStream;
+use Amp\Cancellation;
 use Amp\Sync\LocalMutex;
 use danog\Loop\Loop;
 use danog\MadelineProto\Loop\VoIP\DjLoop;
 use danog\MadelineProto\MTProtoTools\Crypt;
+use danog\MadelineProto\RPCError\CallAlreadyAcceptedError;
+use danog\MadelineProto\RPCError\CallAlreadyDeclinedError;
 use danog\MadelineProto\VoIP\CallState;
 use danog\MadelineProto\VoIP\DiscardReason;
 use danog\MadelineProto\VoIP\Endpoint;
@@ -37,6 +41,7 @@ use Webmozart\Assert\Assert;
 
 use function Amp\async;
 use function Amp\delay;
+use function Amp\File\openFile;
 use function Amp\Future\await;
 
 /** @internal */
@@ -144,6 +149,10 @@ final class VoIPController
 
     private LocalMutex $authMutex;
 
+    private ?LocalFile $outputFile = null;
+    private ?OggWriter $outputStream = null;
+    private ?int $outputStreamId = null;
+
     /**
      * Constructor.
      *
@@ -169,7 +178,8 @@ final class VoIPController
     public function __serialize(): array
     {
         $result = get_object_vars($this);
-        unset($result['authMutex']);
+        unset($result['authMutex'], $result['outputStream']);
+
         return $result;
     }
     /**
@@ -187,6 +197,11 @@ final class VoIPController
         $this->diskJockey ??= new DjLoop($this);
         Assert::true($this->diskJockey->start());
         EventLoop::queue(function (): void {
+            if (isset($this->outputFile)) {
+                \assert($this->outputStreamId !== null);
+                $out = openFile($this->outputFile->file, 'a');
+                $this->outputStream = new OggWriter($out, $this->outputStreamId);
+            }
             if ($this->callState === CallState::RUNNING) {
                 if ($this->voipState === VoIPState::CREATED) {
                     // No endpoints yet
@@ -231,20 +246,17 @@ final class VoIPController
                     'g_a' => $this->call['g_a'],
                     'protocol' => self::CALL_PROTOCOL,
                 ]))['phone_call'];
-            } catch (RPCErrorException $e) {
-                if ($e->rpc === 'CALL_ALREADY_ACCEPTED') {
-                    $this->log(sprintf(Lang::$current_lang['call_already_accepted'], $params['id']));
-                    return true;
-                }
-                if ($e->rpc === 'CALL_ALREADY_DECLINED') {
-                    $this->log(Lang::$current_lang['call_already_declined']);
-                    $this->discard(DiscardReason::HANGUP);
-                    return false;
-                }
-                throw $e;
+            } catch (CallAlreadyAcceptedError) {
+                $this->log(sprintf(Lang::$current_lang['call_already_accepted'], $params['id']));
+                return true;
+            } catch (CallAlreadyDeclinedError) {
+                $this->log(Lang::$current_lang['call_already_declined']);
+                $this->discard(DiscardReason::HANGUP);
+                return false;
             }
             $visualization = [];
             $length = new BigInteger(\count(Magic::$emojis));
+            \assert(isset($this->call['g_a']) && \is_string($this->call['g_a']));
             foreach (str_split(hash('sha256', $key.str_pad($this->call['g_a'], 256, \chr(0), STR_PAD_LEFT), true), 8) as $number) {
                 $number[0] = \chr(\ord($number[0]) & 0x7f);
                 $visualization[] = Magic::$emojis[(int) (new BigInteger($number, 256))->divide($length)[1]->toString()];
@@ -265,7 +277,7 @@ final class VoIPController
     /**
      * Accept incoming call.
      */
-    public function accept(): self
+    public function accept(?Cancellation $cancellation = null): self
     {
         $lock = $this->authMutex->acquire();
         try {
@@ -275,7 +287,7 @@ final class VoIPController
             Assert::eq($this->callState->name, CallState::INCOMING->name);
 
             $this->log(sprintf(Lang::$current_lang['accepting_call'], $this->public->otherID), Logger::VERBOSE);
-            $dh_config = $this->API->getDhConfig();
+            $dh_config = $this->API->getDhConfig($cancellation);
             $this->log('Generating b...', Logger::VERBOSE);
             $b = BigInteger::randomRange(Magic::$two, $dh_config['p']->subtract(Magic::$two));
             $g_b = $dh_config['g']->powMod($b, $dh_config['p']);
@@ -291,18 +303,15 @@ final class VoIPController
                     ],
                     'g_b' => $g_b->toBytes(),
                     'protocol' => self::CALL_PROTOCOL,
+                    'cancellation' => $cancellation,
                 ]);
-            } catch (RPCErrorException $e) {
-                if ($e->rpc === 'CALL_ALREADY_ACCEPTED') {
-                    $this->log(sprintf(Lang::$current_lang['call_already_accepted'], $this->public->callID));
-                    return $this;
-                }
-                if ($e->rpc === 'CALL_ALREADY_DECLINED') {
-                    $this->log(Lang::$current_lang['call_already_declined']);
-                    $this->discard(DiscardReason::HANGUP);
-                    return $this;
-                }
-                throw $e;
+            } catch (CallAlreadyAcceptedError) {
+                $this->log(sprintf(Lang::$current_lang['call_already_accepted'], $this->public->callID));
+                return $this;
+            } catch (CallAlreadyDeclinedError) {
+                $this->log(Lang::$current_lang['call_already_declined']);
+                $this->discard(DiscardReason::HANGUP);
+                return $this;
             }
             $this->call['b'] = $b;
 
@@ -404,10 +413,7 @@ final class VoIPController
                 DiscardReason::DISCONNECTED => 'phoneCallDiscardReasonDisconnect',
                 DiscardReason::MISSED => 'phoneCallDiscardReasonMissed'
             }]]);
-        } catch (RPCErrorException $e) {
-            if (!\in_array($e->rpc, ['CALL_ALREADY_DECLINED', 'CALL_ALREADY_ACCEPTED'], true)) {
-                throw $e;
-            }
+        } catch (CallAlreadyAcceptedError|CallAlreadyDeclinedError) {
         }
         if ($rating !== null) {
             $this->log(sprintf('Setting rating for call %s...', $this->call), Logger::VERBOSE);
@@ -501,6 +507,7 @@ final class VoIPController
     }
     private static function readString(BufferedReader $buffer): string
     {
+        /** @psalm-suppress InvalidArgument */
         return $buffer->readLength(\ord($buffer->readLength(1)));
     }
     private static function readBuffer(BufferedReader $buffer): string
@@ -588,6 +595,7 @@ final class VoIPController
      */
     private function handlePacket(Endpoint $socket, array $packet): void
     {
+        $cnt = 0;
         switch ($packet['_']) {
             case self::PKT_INIT:
                 $this->setVoipState(VoIPState::WAIT_INIT_ACK);
@@ -627,6 +635,12 @@ final class VoIPController
                     $this->initStream();
                 }
                 break;
+        }
+        if ($this->outputStream !== null && $cnt) {
+            unset($packet['_'], $packet['extra']);
+            foreach ($packet as ['data' => $data]) {
+                $this->outputStream->writeChunk($data, 2880, false);
+            }
         }
     }
     private function initStream(): void
@@ -750,6 +764,24 @@ final class VoIPController
             $t += $delay;
         }
     }
+    /**
+     * Set output file or stream for incoming OPUS audio packets.
+     *
+     * Will write an OGG OPUS stream to the specified file or stream.
+     */
+    public function setOutput(LocalFile|WritableStream $file): void
+    {
+        if ($file instanceof LocalFile) {
+            $this->outputFile = $file;
+            $file = openFile($file->file, 'w');
+        } else {
+            $this->outputFile = null;
+        }
+        $this->outputStreamId = random_int(-(2**31), (2**31)-1);
+        $this->outputStream = new OggWriter($file, $this->outputStreamId);
+        $this->outputStream->writeHeader(1, 48000, "incoming audio stream");
+    }
+
     /**
      * Play file.
      */

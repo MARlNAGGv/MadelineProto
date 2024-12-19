@@ -12,11 +12,13 @@ function mergeExtracted(): void
         return;
     }
     foreach (json_decode(file_get_contents('extracted.json'), true) as $key => $value) {
+        $key = html_entity_decode($key);
         if ($key === 'method_messages.sendMultiMedia_param_multi_media_type_Vector<InputSingleMedia>') {
             $value = 'The medias to send';
         }
         $key = preg_replace(['|flags\.\d+[?]|', '/Vector[<].*/'], ['', 'Vector t'], $key);
         $key = str_replace('param_hash_type_int', 'param_hash_type_Vector t', $key);
+        $key = str_replace('param_peer_type_Peer', 'param_peer_type_long', $key);
         Lang::$lang['en'][$key] = $value;
     }
     foreach (Lang::$lang['en'] as $key => $value) {

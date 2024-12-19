@@ -129,18 +129,14 @@ trait FileServer
             }
 
             $messageMedia = $this->getDownloadInfo($media);
-            $messageMedia['size'] ??= $size;
-            $messageMedia['mime'] ??= $mime;
-            $messageMedia['name'] ??= $name;
-
-            $f = \is_string($media) ? $media : ($this->extractBotAPIFile($this->MTProtoToBotAPI($media))['file_id']);
-            [
-                'name' => $name,
-                'ext' => $ext,
-                'mime' => $mime,
-                'size' => $size,
-            ] = $messageMedia;
-            $name = $name.$ext;
+            $size ??= $messageMedia['size'];
+            $mime ??= $messageMedia['mime'];
+            if (\is_string($media)) {
+                $f = $media;
+            } else {
+                $f = $this->extractBotAPIFile($this->MTProtoToBotAPI($media))['file_id'];
+                $name ??= $messageMedia['name'].$messageMedia['ext'];
+            }
         }
 
         return $scriptUrl."?".http_build_query([
@@ -225,6 +221,9 @@ trait FileServer
     private static array $checkedScripts = [];
     private function checkDownloadScript(string $scriptUrl): void
     {
+        if (!str_starts_with($scriptUrl, 'http://') && !str_starts_with($scriptUrl, 'https://')) {
+            throw new AssertionError("The download script must be an HTTP (preferrably HTTPS) URL!");
+        }
         if (isset(self::$checkedScripts[$scriptUrl])) {
             return;
         }

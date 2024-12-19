@@ -18,12 +18,28 @@ namespace danog\MadelineProto\Ipc\Wrapper;
 
 use Amp\Cancellation as AmpCancellation;
 use Amp\CancelledException;
+use danog\MadelineProto\Ipc\ClientAbstract;
 
 /**
  * @internal
  */
-final class Cancellation extends Obj implements AmpCancellation
+final class Cancellation implements AmpCancellation
 {
+    /**
+     * @var array<string, true> $handlers
+     */
+    private array $handlers = [];
+    private CancellationInner $inner;
+    /**
+     * Constructor.
+     *
+     * @param array<string, int> $methods
+     */
+    public function __construct(ClientAbstract $wrapper, array $methods)
+    {
+        $this->inner = new CancellationInner($wrapper, $methods);
+    }
+
     /**
      * Subscribes a new handler to be invoked on a cancellation request.
      *
@@ -37,7 +53,9 @@ final class Cancellation extends Obj implements AmpCancellation
      */
     public function subscribe(\Closure $callback): string
     {
-        return $this->__call('unsubscribe', [$callback]);
+        $id = $this->inner->subscribe($callback);
+        $this->handlers[$id] = true;
+        return $id;
     }
 
     /**
@@ -47,7 +65,8 @@ final class Cancellation extends Obj implements AmpCancellation
      */
     public function unsubscribe(string $id): void
     {
-        $this->__call('unsubscribe', [$id]);
+        unset($this->handlers[$id]);
+        $this->inner->unsubscribe($id);
     }
 
     /**
@@ -55,7 +74,7 @@ final class Cancellation extends Obj implements AmpCancellation
      */
     public function isRequested(): bool
     {
-        return $this->__call('isRequested');
+        return $this->inner->isRequested();
     }
 
     /**
@@ -65,6 +84,13 @@ final class Cancellation extends Obj implements AmpCancellation
      */
     public function throwIfRequested(): void
     {
-        $this->__call('throwIfRequested');
+        $this->inner->throwIfRequested();
+    }
+
+    public function __destruct()
+    {
+        foreach ($this->handlers as $handler => $_) {
+            $this->inner->unsubscribe($handler);
+        }
     }
 }

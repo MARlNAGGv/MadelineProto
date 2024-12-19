@@ -19,13 +19,8 @@ namespace danog\MadelineProto\EventHandler\Message;
 use AssertionError;
 use danog\MadelineProto\EventHandler\Message;
 use danog\MadelineProto\EventHandler\Participant;
-use danog\MadelineProto\EventHandler\Participant\Admin;
-use danog\MadelineProto\EventHandler\Participant\Banned;
-use danog\MadelineProto\EventHandler\Participant\Creator;
-use danog\MadelineProto\EventHandler\Participant\Left;
-use danog\MadelineProto\EventHandler\Participant\Member;
-use danog\MadelineProto\EventHandler\Participant\MySelf;
 use danog\MadelineProto\MTProto;
+use danog\MadelineProto\RPCError\MsgIdInvalidError;
 
 /**
  * Represents an incoming or outgoing channel message.
@@ -33,12 +28,35 @@ use danog\MadelineProto\MTProto;
 final class ChannelMessage extends Message
 {
     /** @internal */
-    public function __construct(
-        MTProto $API,
-        array $rawMessage,
-        array $info
-    ) {
-        parent::__construct($API, $rawMessage, $info);
+    public function __construct(MTProto $API, array $rawMessage, array $info, bool $scheduled)
+    {
+        parent::__construct($API, $rawMessage, $info, $scheduled);
+    }
+
+    /**
+     * Obtains the copy of the current message, that was sent to the linked group.
+     *
+     * Can be used to reply in the comment section, for example:
+     *
+     * ```php
+     * $update->getDiscussion()->reply("Comment");
+     * ```
+     *
+     */
+    public function getDiscussion(): ?GroupMessage
+    {
+        try {
+            $r = $this->getClient()->methodCallAsyncRead(
+                'messages.getDiscussionMessage',
+                ['peer' => $this->chatId, 'msg_id' => $this->id]
+            )['messages'];
+            $r = end($r);
+            $v = $this->getClient()->wrapMessage($r);
+            \assert($v instanceof GroupMessage);
+            return $v;
+        } catch (MsgIdInvalidError) {
+            return null;
+        }
     }
 
     /**
@@ -87,16 +105,7 @@ final class ChannelMessage extends Message
                 'participant' => $member,
             ]
         )['participant'];
-
-        return match ($result['_']) {
-            'channelParticipant' => new Member($result),
-            'channelParticipantLeft' => new Left($client, $result),
-            'channelParticipantSelf' => new MySelf($result),
-            'channelParticipantAdmin' => new Admin($result),
-            'channelParticipantBanned' => new Banned($client, $result),
-            'channelParticipantCreator' => new Creator($result),
-            default => throw new AssertionError("undefined Participant type: {$result['_']}")
-        };
+        return Participant::fromRawParticipant($result);
     }
 
     /**

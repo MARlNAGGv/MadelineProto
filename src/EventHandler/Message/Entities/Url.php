@@ -7,4 +7,12 @@ namespace danog\MadelineProto\EventHandler\Message\Entities;
  */
 final class Url extends MessageEntity
 {
+    public function toBotAPI(): array
+    {
+        return ['type' => 'url', 'offset' => $this->offset, 'length' => $this->length];
+    }
+    public function toMTProto(): array
+    {
+        return ['_' => 'messageEntityUrl', 'offset' => $this->offset, 'length' => $this->length];
+    }
 }

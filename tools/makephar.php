@@ -23,19 +23,23 @@ $p->buildFromDirectory(realpath($argv[1]), '/^((?!tests).)*(\.php|\.py|\.exe|\.t
 
 $p->setStub('<?php
 
-if ((PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 1) || PHP_MAJOR_VERSION <= 7) {
-    die("MadelineProto requires at least PHP 8.1.".PHP_EOL);
+if ((PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 2) || PHP_MAJOR_VERSION <= 7) {
+    die("MadelineProto requires at least PHP 8.2.".PHP_EOL);
 }
 if (PHP_INT_SIZE < 8) {
-    die("A 64-bit build of PHP is required to run MadelineProto, PHP 8.1 is required.".PHP_EOL);
+    die("A 64-bit build of PHP is required to run MadelineProto, PHP 8.2 is required.".PHP_EOL);
+}
+
+if (\extension_loaded("psr")) {
+    die("Please uninstall the psr extension to use MadelineProto!");
 }
 
 if (\defined("MADELINE_PHAR")) {
-    throw new \Exception("Please do not include madeline.phar twice, use require_once \'madeline.phar\';!");
+    die("Please do not include madeline.phar twice, use require_once \'madeline.phar\';!");
 }
 
 if (!\defined(\'MADELINE_ALLOW_COMPOSER\') && \class_exists(\Composer\Autoload\ClassLoader::class)) {
-    throw new \Exception(\'Composer autoloader detected: madeline.phar is incompatible with Composer, please install MadelineProto using composer: https://docs.madelineproto.xyz/docs/INSTALLATION.html#composer-from-existing-project\');
+    die(\'Composer autoloader detected: madeline.phar is incompatible with Composer, please install MadelineProto using composer: https://docs.madelineproto.xyz/docs/INSTALLATION.html#composer-from-existing-project\');
 }
 
 \define(\'MADELINE_PHAR\', __FILE__);

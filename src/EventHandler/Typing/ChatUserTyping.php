@@ -24,13 +24,13 @@ use danog\MadelineProto\MTProto;
  */
 final class ChatUserTyping extends Typing
 {
-    /** @var int Group ID. */
+    /** Group ID. */
     public readonly int $chatId;
 
     /** @internal */
     public function __construct(MTProto $API, array $rawTyping)
     {
         parent::__construct($API, $rawTyping);
-        $this->chatId = $rawTyping['chat_id'];
+        $this->chatId = -$rawTyping['chat_id'];
     }
 }

@@ -7,13 +7,24 @@ namespace danog\MadelineProto\EventHandler\Message\Entities;
  */
 final class CustomEmoji extends MessageEntity
 {
-    /**  @var int Document ID of the [custom emoji](https://core.telegram.org/api/custom-emoji). */
-    public readonly int $documentId;
+    public function __construct(
+        /** Offset of message entity within message (in UTF-16 code units) */
+        public readonly int $offset,
 
-    /** @internal  */
-    protected function __construct(array $rawEntities)
+        /** Length of message entity within message (in UTF-16 code units) */
+        public readonly int $length,
+
+        /** Document ID of the [custom emoji](https://core.telegram.org/api/custom-emoji). */
+        public readonly int $documentId
+    ) {
+    }
+
+    public function toBotAPI(): array
     {
-        parent::__construct($rawEntities);
-        $this->documentId = $rawEntities['document_id'];
+        return ['type' => 'custom_emoji', 'offset' => $this->offset, 'length' => $this->length, 'custom_emoji_id' => $this->documentId];
+    }
+    public function toMTProto(): array
+    {
+        return ['_' => 'messageEntityCustomEmoji', 'offset' => $this->offset, 'length' => $this->length, 'document_id' => $this->documentId];
     }
 }

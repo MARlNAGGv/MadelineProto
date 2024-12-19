@@ -20,8 +20,12 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\TL;
 
+use AssertionError;
+use danog\DialogId\DialogId;
+use danog\MadelineProto\EventHandler\Message\Entities\MessageEntity;
 use danog\MadelineProto\Lang;
 use danog\MadelineProto\Logger;
+use danog\MadelineProto\Magic;
 use danog\MadelineProto\MTProto;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\SecurityException;
@@ -69,20 +73,20 @@ final class TL implements TLInterface
     private array $tdDescriptions;
 
     /** @var array<string, list<TBeforeMethodResponseDeserialization>> */
-    private array $beforeMethodResponseDeserialization;
+    public array $beforeMethodResponseDeserialization;
 
     /** @var array<string, list<TAfterMethodResponseDeserialization>> */
-    private array $afterMethodResponseDeserialization;
+    public array $afterMethodResponseDeserialization;
 
     /** @var array<string, TBeforeConstructorSerialization> */
-    private array $beforeConstructorSerialization;
+    public array $beforeConstructorSerialization;
     /** @var array<string, list<TBeforeConstructorDeserialization>> */
-    private array $beforeConstructorDeserialization;
+    public array $beforeConstructorDeserialization;
     /** @var array<string, list<TAfterConstructorDeserialization>> */
-    private array $afterConstructorDeserialization;
+    public array $afterConstructorDeserialization;
 
     /** @var array<string, TTypeMismatch> */
-    private array $typeMismatch;
+    public array $typeMismatch;
 
     /**
      * API instance.
@@ -167,132 +171,21 @@ final class TL implements TLInterface
             $filec = file_get_contents(Tools::absolute($file));
             $TL_dict = json_decode($filec, true);
             if ($TL_dict === null) {
-                $TL_dict = ['methods' => [], 'constructors' => []];
-                $type = 'constructors';
-                $layer = null;
-                $tl_file = explode("\n", $filec);
-                $key = 0;
-                $e = null;
-                $class = null;
-                $dparams = [];
-                $lineBuf = '';
-                foreach ($tl_file as $line) {
-                    $line = rtrim($line);
-                    if (preg_match('|^//@|', $line)) {
-                        $list = explode(' @', str_replace('//', ' ', $line));
-                        foreach ($list as $elem) {
-                            if ($elem === '') {
-                                continue;
-                            }
-                            $elem = explode(' ', $elem, 2);
-                            if ($elem[0] === 'class') {
-                                $elem = explode(' ', $elem[1], 2);
-                                $class = $elem[0];
-                                continue;
-                            }
-                            if ($elem[0] === 'description') {
-                                if (!\is_null($class)) {
-                                    $this->tdDescriptions['types'][$class] = $elem[1];
-                                    $class = null;
-                                } else {
-                                    $e = $elem[1];
-                                }
-                                continue;
-                            }
-                            if ($elem[0] === 'param_description') {
-                                $elem[0] = 'description';
-                            }
-                            $dparams[$elem[0]] = $elem[1];
-                        }
-                        continue;
-                    }
-                    $line = preg_replace(['|//.*|', '|^\\s+$|'], '', $line);
-                    if ($line === '') {
-                        continue;
-                    }
-                    if ($line === '---functions---') {
-                        $type = 'methods';
-                        continue;
-                    }
-                    if ($line === '---types---') {
-                        $type = 'constructors';
-                        continue;
-                    }
-                    if (preg_match('|^===(\\d*)===|', $line, $matches)) {
-                        $layer = (int) $matches[1];
-                        continue;
-                    }
-                    if (str_starts_with($line, 'vector#')) {
-                        continue;
-                    }
-                    if (str_contains($line, ' ?= ')) {
-                        continue;
-                    }
-                    $line = preg_replace(['/[(]([\\w\\.]+) ([\\w\\.]+)[)]/', '/\\s+/'], ['$1<$2>', ' '], $line);
-                    if (!str_contains($line, ';')) {
-                        $lineBuf .= $line;
-                        continue;
-                    } elseif ($lineBuf) {
-                        $lineBuf .= $line;
-                        $line = $lineBuf;
-                        $lineBuf = '';
-                    }
-                    $name = preg_replace(['/#.*/', '/\\s.*/'], '', $line);
-                    if (\in_array($name, ['bytes', 'int128', 'int256', 'int512', 'int', 'long', 'double', 'string', 'bytes', 'object', 'function'], true)) {
-                        /*if (!(\in_array($scheme_type, ['ton_api', 'lite_api'], true) && $name === 'bytes')) {
-                              continue;
-                          }*/
-                        continue;
-                    }
-                    if (\in_array($scheme_type, ['ton_api', 'lite_api'], true)) {
-                        $clean = preg_replace(['/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/{/', '/}/'], ['', ' ', '', ' ', ' ', ' ', '', '', '', ''], $line);
-                    } else {
-                        $clean = preg_replace(['/:bytes /', '/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/\\?bytes /', '/{/', '/}/'], [':string ', '', ' ', '', ' ', ' ', ' ', '', '', '?string ', '', ''], $line);
-                    }
-                    $id = hash('crc32b', $clean);
-                    if (preg_match('/^[^\\s]+#([a-f0-9]*)/i', $line, $matches)) {
-                        $nid = str_pad($matches[1], 8, '0', STR_PAD_LEFT);
-                        /*if ($id !== $nid) {
-                            $this->API?->logger?->logger(\sprintf('CRC32 mismatch (%s, %s) for %s', $id, $nid, $line), Logger::ERROR);
-                        }*/
-                        $id = $nid;
-                    }
-                    if (!\is_null($e)) {
-                        $this->tdDescriptions[$type][$name] = ['description' => $e, 'params' => $dparams];
-                        $e = null;
-                        $dparams = [];
-                    }
-                    $TL_dict[$type][$key][$type === 'constructors' ? 'predicate' : 'method'] = $name;
-                    $TL_dict[$type][$key]['id'] = $a = strrev(hex2bin($id));
-                    $TL_dict[$type][$key]['params'] = [];
-                    $TL_dict[$type][$key]['type'] = preg_replace(['/.+\\s+=\\s+/', '/;/'], '', $line);
-                    if ($layer !== null) {
-                        $TL_dict[$type][$key]['layer'] = $layer;
-                    }
-                    if ($name !== 'vector' && $TL_dict[$type][$key]['type'] !== 'Vector t') {
-                        foreach (explode(' ', preg_replace(['/^[^\\s]+\\s/', '/=\\s[^\\s]+/', '/\\s$/'], '', $line)) as $param) {
-                            if ($param === '') {
-                                continue;
-                            }
-                            if ($param[0] === '{') {
-                                continue;
-                            }
-                            if ($param === '#') {
-                                continue;
-                            }
-                            $explode = explode(':', $param);
-                            $TL_dict[$type][$key]['params'][] = ['name' => $explode[0], 'type' => $explode[1]];
-                        }
-                    }
-                    $key++;
+                $TL_dict = $this->toJson($filec, $scheme_type);
+            }
+            foreach ($TL_dict['constructors'] as $key => $value) {
+                $id = $TL_dict['constructors'][$key]['id'];
+                if (!is_numeric($id)) {
+                    throw new AssertionError("ID isn't numeric!");
                 }
-            } else {
-                foreach ($TL_dict['constructors'] as $key => $value) {
-                    $TL_dict['constructors'][$key]['id'] = Tools::packSignedInt($TL_dict['constructors'][$key]['id']);
+                $TL_dict['constructors'][$key]['id'] = Tools::packSignedInt((int) $id);
+            }
+            foreach ($TL_dict['methods'] as $key => $value) {
+                $id = $TL_dict['methods'][$key]['id'];
+                if (!is_numeric($id)) {
+                    throw new AssertionError("ID isn't numeric!");
                 }
-                foreach ($TL_dict['methods'] as $key => $value) {
-                    $TL_dict['methods'][$key]['id'] = Tools::packSignedInt($TL_dict['methods'][$key]['id']);
-                }
+                $TL_dict['methods'][$key]['id'] = Tools::packSignedInt((int) $id);
             }
 
             if (empty($TL_dict) || empty($TL_dict['constructors']) || !isset($TL_dict['methods'])) {
@@ -339,6 +232,139 @@ final class TL implements TLInterface
             }
         }
         $files->upgrade();
+    }
+    /**
+     * @return array{
+     *      constructors: list<array{id: numeric-string, predicate: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>,
+     *      methods: list<array{id: numeric-string, method: string, params: list<array{name: string, type: string}>, type: string, layer?: int}>
+     * }
+     */
+    public function toJson(string $filec, ?string $scheme_type = null): array
+    {
+        $TL_dict = ['constructors' => [], 'methods' => []];
+        $type = 'constructors';
+        $layer = null;
+        $tl_file = explode("\n", $filec);
+        $key = 0;
+        $e = null;
+        $class = null;
+        $dparams = [];
+        $lineBuf = '';
+        foreach ($tl_file as $line) {
+            $line = rtrim($line);
+            if (preg_match('|^//@|', $line)) {
+                $list = explode(' @', str_replace('//', ' ', $line));
+                foreach ($list as $elem) {
+                    if ($elem === '') {
+                        continue;
+                    }
+                    $elem = explode(' ', $elem, 2);
+                    if ($elem[0] === 'class') {
+                        $elem = explode(' ', $elem[1], 2);
+                        $class = $elem[0];
+                        continue;
+                    }
+                    if ($elem[0] === 'description') {
+                        if (!\is_null($class)) {
+                            $this->tdDescriptions['types'][$class] = $elem[1];
+                            $class = null;
+                        } else {
+                            $e = $elem[1];
+                        }
+                        continue;
+                    }
+                    if ($elem[0] === 'param_description') {
+                        $elem[0] = 'description';
+                    }
+                    $dparams[$elem[0]] = $elem[1];
+                }
+                continue;
+            }
+            $line = preg_replace(['|//.*|', '|^\\s+$|'], '', $line);
+            if ($line === '') {
+                continue;
+            }
+            if ($line === '---functions---') {
+                $type = 'methods';
+                continue;
+            }
+            if ($line === '---types---') {
+                $type = 'constructors';
+                continue;
+            }
+            if (preg_match('|^===(\\d*)===|', $line, $matches)) {
+                $layer = (int) $matches[1];
+                continue;
+            }
+            if (str_starts_with($line, 'vector#')) {
+                $TL_dict[$type][]= [
+                    "id" => "481674261",
+                    "predicate" => "vector",
+                    "params" => [],
+                    "type" => "Vector t",
+                ];
+                continue;
+            }
+            if (str_contains($line, ' ?= ')) {
+                continue;
+            }
+            $line = preg_replace(['/[(]([\\w\\.]+) ([\\w\\.]+)[)]/', '/\\s+/'], ['$1<$2>', ' '], $line);
+            if (!str_contains($line, ';')) {
+                $lineBuf .= $line;
+                continue;
+            } elseif ($lineBuf) {
+                $lineBuf .= $line;
+                $line = $lineBuf;
+                $lineBuf = '';
+            }
+            $name = preg_replace(['/#.*/', '/\\s.*/'], '', $line);
+            if (\in_array($name, ['bytes', 'int128', 'int256', 'int512', 'int', 'long', 'double', 'string', 'bytes', 'object', 'function'], true)) {
+                continue;
+            }
+            if (\in_array($scheme_type, ['ton_api', 'lite_api'], true)) {
+                $clean = preg_replace(['/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/{/', '/}/'], ['', ' ', '', ' ', ' ', ' ', '', '', '', ''], $line);
+            } else {
+                $clean = preg_replace(['/:bytes /', '/;/', '/#[a-f0-9]+ /', '/ [a-zA-Z0-9_]+\\:flags\\.[0-9]+\\?true/', '/[<]/', '/[>]/', '/  /', '/^ /', '/ $/', '/\\?bytes /', '/{/', '/}/'], [':string ', '', ' ', '', ' ', ' ', ' ', '', '', '?string ', '', ''], $line);
+            }
+            $id = hash('crc32b', $clean);
+            if (preg_match('/^[^\\s]+#([a-f0-9]*)/i', $line, $matches)) {
+                $nid = str_pad($matches[1], 8, '0', STR_PAD_LEFT);
+                /*if ($id !== $nid) {
+                    $this->API?->logger?->logger(\sprintf('CRC32 mismatch (%s, %s) for %s', $id, $nid, $line), Logger::ERROR);
+                }*/
+                $id = $nid;
+            }
+            if (!\is_null($e)) {
+                $this->tdDescriptions[$type][$name] = ['description' => $e, 'params' => $dparams];
+                $e = null;
+                $dparams = [];
+            }
+            $key = \count($TL_dict[$type]);
+            $TL_dict[$type][$key]['id'] = (string) Tools::unpackSignedInt(strrev(hex2bin($id)));
+            $TL_dict[$type][$key][$type === 'constructors' ? 'predicate' : 'method'] = $name;
+            $TL_dict[$type][$key]['params'] = [];
+            $TL_dict[$type][$key]['type'] = preg_replace(['/.+\\s+=\\s+/', '/;/'], '', $line);
+            if ($layer !== null) {
+                $TL_dict[$type][$key]['layer'] = $layer;
+            }
+            if ($name !== 'vector' && $TL_dict[$type][$key]['type'] !== 'Vector t') {
+                foreach (explode(' ', preg_replace(['/^[^\\s]+\\s/', '/=\\s[^\\s]+/', '/\\s$/'], '', $line)) as $param) {
+                    if ($param === '') {
+                        continue;
+                    }
+                    if ($param[0] === '{') {
+                        continue;
+                    }
+                    if ($param === '#') {
+                        continue;
+                    }
+                    $explode = explode(':', $param);
+                    $TL_dict[$type][$key]['params'][] = ['name' => $explode[0], 'type' => $explode[1]];
+                }
+            }
+        }
+
+        return $TL_dict;
     }
     /**
      * Get TL namespaces.
@@ -440,6 +466,7 @@ final class TL implements TLInterface
                     return substr($object, 1);
                 }
                 if (\is_array($object) && $type['name'] === 'hash') {
+                    /** @psalm-suppress MixedArgumentTypeCoercion Typechecks are done inside */
                     return Tools::genVectorHash($object);
                 }
                 if (\is_array($object) && \count($object) === 2) {
@@ -577,6 +604,9 @@ final class TL implements TLInterface
                     return $object;
                 }
         }
+        if ($object instanceof MessageEntity) {
+            $object = $object->toMTProto();
+        }
         if ($type['type'] === 'InputMessage' && !\is_array($object)) {
             $object = ['_' => 'inputMessageID', 'id' => $object];
         } elseif (isset($this->typeMismatch[$type['type']]) && (!\is_array($object) || isset($object['_']) && $this->constructors->findByPredicate($object['_'])['type'] !== $type['type'])) {
@@ -601,7 +631,7 @@ final class TL implements TLInterface
         $predicate = $object['_'];
         $constructorData = $this->constructors->findByPredicate($predicate, $layer);
         if ($constructorData === false) {
-            $this->API->logger($object, Logger::FATAL_ERROR);
+            //$this->API->logger($object, Logger::FATAL_ERROR);
             throw new Exception(sprintf(Lang::$current_lang['type_extract_error'], $predicate));
         }
         if ($bare = $type['type'] != '' && $type['type'][0] === '%') {
@@ -731,9 +761,15 @@ final class TL implements TLInterface
                     case '%DataJSON':
                         $value = null;
                         break;
+                    case '#':
+                        $value = 0;
+                        break;
                     default:
-                        $value = ['_' => $this->constructors->findByType($type)['predicate']];
-                        throw new Exception(Lang::$current_lang['params_missing'].' '.$name);
+                        if ($this->API->getSettings()->getSchema()->getFuzzMode()) {
+                            $value = ['_' => $this->constructors->findByType($type)['predicate']];
+                        } else {
+                            throw new Exception(Lang::$current_lang['params_missing'].' '.$name);
+                        }
                 }
             } else {
                 $value = $arguments[$name];
@@ -1002,8 +1038,8 @@ final class TL implements TLInterface
             if ($x['_'] === 'rpc_result' && $arg['name'] === 'result' && isset($type['connection']->outgoing_messages[$x['req_msg_id']])) {
                 /** @var MTProtoOutgoingMessage */
                 $message = $type['connection']->outgoing_messages[$x['req_msg_id']];
-                foreach ($this->beforeMethodResponseDeserialization[$message->getConstructor()] ?? [] as $callback) {
-                    $callback($type['connection']->outgoing_messages[$x['req_msg_id']]->getConstructor());
+                foreach ($this->beforeMethodResponseDeserialization[$message->constructor] ?? [] as $callback) {
+                    $callback($type['connection']->outgoing_messages[$x['req_msg_id']]->constructor);
                 }
                 if ($message->subtype) {
                     $arg['subtype'] = $message->subtype;
@@ -1013,13 +1049,33 @@ final class TL implements TLInterface
                 $arg['connection'] = $type['connection'];
             }
             $x[$arg['name']] = $this->deserialize($stream, $arg);
-            if ($arg['name'] === 'random_bytes') {
-                if (\strlen((string) $x[$arg['name']]) < 15) {
-                    throw new SecurityException('Random_bytes is too small!');
-                }
-                unset($x[$arg['name']]);
+            if ($arg['name'] === 'chat_id' && $arg['type'] === 'long') {
+                $x['chat_id'] = -$x['chat_id'];
             }
         }
+        if (isset($x['migrated_from_chat_id'])) {
+            $x['migrated_from_chat_id'] = -$x['migrated_from_chat_id'];
+        }
+
+        if (isset($x['channel_id'])) {
+            $x['channel_id'] = Magic::ZERO_CHANNEL_ID - $x['channel_id'];
+        } elseif (isset($x['random_bytes'])) {
+            if (\strlen((string) $x['random_bytes']) < 15) {
+                throw new SecurityException('Random_bytes is too small!');
+            }
+            unset($x['random_bytes']);
+        } elseif ($x['_'] === 'channel'
+            || $x['_'] === 'channelForbidden'
+            || $x['_'] === 'channelFull'
+        ) {
+            $x['id'] = DialogId::fromSupergroupOrChannelId($x['id']);
+        } elseif ($x['_'] === 'chat'
+            || $x['_'] === 'chatForbidden'
+            || $x['_'] === 'chatFull'
+        ) {
+            $x['id'] = -$x['id'];
+        }
+
         if ($x['_'] === 'dataJSON') {
             return json_decode($x['data'], true);
         } elseif ($constructorData['type'] === 'JSONValue') {
@@ -1044,8 +1100,8 @@ final class TL implements TLInterface
             }
         } elseif ($x['_'] === 'rpc_result'
             && isset($type['connection']->outgoing_messages[$x['req_msg_id']])
-            && isset($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->getConstructor()])) {
-            foreach ($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->getConstructor()] as $callback) {
+            && isset($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor])) {
+            foreach ($this->afterMethodResponseDeserialization[$type['connection']->outgoing_messages[$x['req_msg_id']]->constructor] as $callback) {
                 $callback($type['connection']->outgoing_messages[$x['req_msg_id']], $x['result']);
             }
         }
@@ -1056,8 +1112,27 @@ final class TL implements TLInterface
                     $x['reply_markup']['rows'][$key]['buttons'][$bkey] = new Types\Button($this->API, $x, $button);
                 }
             }
+        } elseif ($x['_'] === 'peerUser') {
+            $x = $x['user_id'];
+        } elseif ($x['_'] === 'peerChat') {
+            $x = $x['chat_id'];
+        } elseif ($x['_'] === 'peerChannel') {
+            $x = $x['channel_id'];
+        } elseif ($x['_'] === 'user') {
+            unset($x['flags'], $x['flags2'], $x['access_hash']);
+        } elseif ($x['_'] === 'channel'
+            || $x['_'] === 'channelForbidden'
+            || $x['_'] === 'channelFull'
+        ) {
+            unset($x['flags'], $x['flags2'], $x['access_hash']);
+        } elseif ($x['_'] === 'chat'
+            || $x['_'] === 'chatForbidden'
+            || $x['_'] === 'chatFull'
+        ) {
+            unset($x['flags']);
+        } else {
+            unset($x['flags'], $x['flags2']);
         }
-        unset($x['flags'], $x['flags2']);
         return $x;
     }
 }

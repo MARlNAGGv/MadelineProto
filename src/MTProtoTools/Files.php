@@ -25,6 +25,8 @@ use Amp\DeferredFuture;
 use Amp\Future;
 use Amp\Http\Client\Request;
 use AssertionError;
+use danog\Decoder\FileIdType;
+use danog\MadelineProto\BotApiFileId;
 use danog\MadelineProto\EventHandler\Media;
 use danog\MadelineProto\EventHandler\Media\AnimatedSticker;
 use danog\MadelineProto\EventHandler\Media\Audio;
@@ -45,8 +47,10 @@ use danog\MadelineProto\FileCallbackInterface;
 use danog\MadelineProto\FileRedirect;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProtoTools\Crypt\IGE;
+use danog\MadelineProto\RPCError\FileTokenInvalidError;
+use danog\MadelineProto\RPCError\FloodPremiumWaitError;
 use danog\MadelineProto\RPCError\FloodWaitError;
-use danog\MadelineProto\RPCErrorException;
+use danog\MadelineProto\RPCError\RequestTokenInvalidError;
 use danog\MadelineProto\SecurityException;
 use danog\MadelineProto\Settings;
 use danog\MadelineProto\StreamEof;
@@ -97,7 +101,7 @@ trait Files
             return new Video($this, $media, $media, $protected);
         }
         if ($media['_'] === 'messageMediaPhoto') {
-            if (!isset($media['photo'])) {
+            if (!isset($media['photo']) || $media['photo']['_'] === 'photoEmpty') {
                 return null;
             }
             return new Photo($this, $media, $protected);
@@ -138,7 +142,10 @@ trait Files
                 }
 
                 if ($has_document_photo === null) {
-                    throw new AssertionError("has_document_photo === null: ".json_encode($media['document']));
+                    $has_document_photo = [
+                        'w' => null,
+                        'h' => null,
+                    ];
                 }
 
                 if ($attr['mask'] ?? false) {
@@ -174,7 +181,7 @@ trait Files
             return new Gif($this, $media, $has_video, $protected);
         }
         if ($has_video) {
-            return $has_video['round_message']
+            return ($has_video['round_message'] ?? false)
                 ? new RoundVideo($this, $media, $has_video, $protected)
                 : new Video($this, $media, $has_video, $protected);
         }
@@ -201,6 +208,7 @@ trait Files
         }
         $request = new Request($url);
         $request->setTransferTimeout(INF);
+        $request->setInactivityTimeout(INF);
         $request->setBodySizeLimit(512 * 1024 * 8000);
         $response = $this->datacenter->getHTTPClient()->request($request, $cancellation);
         if (($status = $response->getStatus()) !== 200) {
@@ -217,11 +225,11 @@ trait Files
      * The callable must accept two parameters: int $offset, int $size
      * The callable must return a string with the contest of the file at the specified offset and size.
      *
-     * @param callable(int, int, ?Cancellation): string $callable  Callable (offset, length) => data
+     * @param (callable(int, int, ?Cancellation): string) $callable  Callable (offset, length) => data
      * @param integer                                   $size      File size
      * @param string                                    $mime      Mime type
      * @param string                                    $fileName  File name
-     * @param callable(float, float, float): void       $cb        Status callback
+     * @param (callable(float, float, float): void)       $cb        Status callback
      * @param boolean                                   $seekable  Whether chunks can be fetched out of order
      * @param boolean                                   $encrypted Whether to encrypt file for secret chats
      *
@@ -312,22 +320,26 @@ trait Files
         };
         $resPromises = [];
         $start = microtime(true);
+        /** @var ?FloodPremiumWaitError */
+        $floodWaitError = null;
         while ($part_num < $part_total_num || !$size) {
             if ($seekable) {
-                $writeCb = function () use ($method, $callable, $part_num, $cancellation, &$datacenter): WrappedFuture {
+                $writeCb = function () use ($method, $callable, $part_num, $cancellation, &$datacenter, &$floodWaitError): WrappedFuture {
+                    $floodWaitError?->wait($cancellation);
                     return $this->methodCallAsyncWrite(
                         $method,
-                        $callable($part_num) + ['cancellation' => $cancellation],
+                        $callable($part_num) + ['cancellation' => $cancellation, 'floodWaitLimit' => 0],
                         $datacenter
                     );
                 };
             } else {
                 try {
-                    $part = $callable($part_num) + ['cancellation' => $cancellation];
+                    $part = $callable($part_num) + ['cancellation' => $cancellation, 'floodWaitLimit' => 0];
                 } catch (StreamEof) {
                     break;
                 }
-                $writeCb = function () use ($method, $part, &$datacenter): WrappedFuture {
+                $writeCb = function () use ($method, $part, &$datacenter, &$floodWaitError, $cancellation): WrappedFuture {
+                    $floodWaitError?->wait($cancellation);
                     return $this->methodCallAsyncWrite(
                         $method,
                         $part,
@@ -336,11 +348,11 @@ trait Files
                 };
             }
             $writePromise = async($writeCb);
-            EventLoop::queue(function () use ($writePromise, $cb, $part_num, $size, &$resPromises, $cancellation, $writeCb, &$datacenter): void {
+            EventLoop::queue(function () use ($writePromise, $cb, $part_num, $size, &$resPromises, $cancellation, $writeCb, &$datacenter, &$floodWaitError): void {
+                $d = new DeferredFuture;
+                $resPromises[] = $d->getFuture();
                 do {
                     $readFuture = $writePromise->await($cancellation);
-                    $d = new DeferredFuture;
-                    $resPromises[] = $d->getFuture();
                     try {
                         // Wrote chunk!
                         if (!$readFuture->await($cancellation)) {
@@ -352,14 +364,17 @@ trait Files
                         }
                         $d->complete();
                         return;
+                    } catch (FloodPremiumWaitError $e) {
+                        $this->logger("Got {$e->rpc} while uploading part $part_num: {$datacenter}, waiting and retrying...");
+                        $floodWaitError = $e;
+                        $writePromise = async($writeCb);
                     } catch (FileRedirect $e) {
                         $datacenter = $e->dc;
-                        $this->logger("Got redirect while uploading $part_num: {$datacenter}");
+                        $this->logger("Got redirect while uploading part $part_num: {$datacenter}");
                         $writePromise = async($writeCb);
                     } catch (Throwable $e) {
                         $cancellation?->throwIfRequested();
-                        $this->logger("Got exception while uploading $part_num: {$e}");
-                        $d->error($e);
+                        $this->logger("Got exception while uploading part $part_num: {$e}");
                         $writePromise = async($writeCb);
                     }
                 } while (true);
@@ -379,6 +394,9 @@ trait Files
         }
         await($promises, $cancellation);
         await($resPromises, $cancellation);
+        if ($totalSize === 0) {
+            throw new AssertionError('You uploaded an empty file!');
+        }
         $time = microtime(true) - $start;
         $speed = (int) ($totalSize * 8 / $time) / 1000000;
         if (!$size) {
@@ -575,6 +593,9 @@ trait Files
                 if (isset($media['ttl_seconds'])) {
                     $res['InputMedia']['ttl_seconds'] = $media['ttl_seconds'];
                 }
+                if (isset($media['spoiler'])) {
+                    $res['InputMedia']['spoiler'] = $media['spoiler'];
+                }
                 break;
             case 'messageMediaDocument':
                 if (!isset($media['document']['access_hash'])) {
@@ -651,17 +672,14 @@ trait Files
         return $this->genAllFile($constructor);
     }
     /**
-     * Get download info of the propic of a user
-     * Returns an array with the following structure:.
-     *
-     * `$info['ext']` - The file extension
-     * `$info['name']` - The file name, without the extension
-     * `$info['mime']` - The file mime type
-     * `$info['size']` - The file size
+     * Gets info of the propic of a user.
      */
-    public function getPropicInfo($data): array
+    public function getPropicInfo($data): ?Photo
     {
-        return $this->getDownloadInfo($this->peerDatabase->get($this->getId($data)));
+        if (!$this->getSettings()->getDb()->getEnableFullPeerDb()) {
+            throw new AssertionError("getPropicInfo cannot be used if the full peer database is disabled!");
+        }
+        return $this->getPwrChat($data, false)['photo'] ?? null;
     }
     /**
      * Extract file info from bot API message.
@@ -670,9 +688,9 @@ trait Files
      */
     public static function extractBotAPIFile(array $info): array|null
     {
-        foreach (\danog\Decoder\TYPES as $type) {
-            if (isset($info[$type]) && \is_array($info[$type])) {
-                $method = $type;
+        foreach (FileIdType::cases() as $type) {
+            if (isset($info[$type->value]) && \is_array($info[$type->value])) {
+                $method = $type->value;
                 break;
             }
         }
@@ -719,6 +737,18 @@ trait Files
      */
     public function getDownloadInfo(mixed $messageMedia): array
     {
+        if ($messageMedia instanceof BotApiFileId) {
+            $res = $this->getDownloadInfo($messageMedia->fileId);
+            $res['size'] = $messageMedia->size;
+            $pathinfo = pathinfo($messageMedia->fileName);
+            if (isset($pathinfo['extension'])) {
+                $res['ext'] = '.'.$pathinfo['extension'];
+            } else {
+                $res['ext'] = '';
+            }
+            $res['name'] = $pathinfo['filename'];
+            return $res;
+        }
         if ($messageMedia instanceof Message) {
             $messageMedia = $messageMedia->media;
         }
@@ -741,6 +771,8 @@ trait Files
                 $pathinfo = pathinfo($messageMedia['file_name']);
                 if (isset($pathinfo['extension'])) {
                     $res['ext'] = '.'.$pathinfo['extension'];
+                } else {
+                    $res['ext'] = '';
                 }
                 $res['name'] = $pathinfo['filename'];
                 return $res;
@@ -782,6 +814,8 @@ trait Files
                     $pathinfo = pathinfo($messageMedia['file_name']);
                     if (isset($pathinfo['extension'])) {
                         $res['ext'] = '.'.$pathinfo['extension'];
+                    } else {
+                        $res['ext'] = '';
                     }
                     $res['name'] = $pathinfo['filename'];
                 }
@@ -797,6 +831,8 @@ trait Files
                                 $pathinfo = pathinfo($attribute['file_name']);
                                 if (isset($pathinfo['extension'])) {
                                     $res['ext'] = '.'.$pathinfo['extension'];
+                                } else {
+                                    $res['ext'] = '';
                                 }
                                 $res['name'] = $pathinfo['filename'];
                                 break;
@@ -868,9 +904,9 @@ trait Files
                 if (\is_array($messageMedia) && ($messageMedia['min'] ?? false) && isset($messageMedia['access_hash'])) {
                     // bot API file ID
                     $messageMedia['min'] = false;
-                    $peer = $this->genAll($messageMedia, null, \danog\MadelineProto\API::INFO_TYPE_PEER);
+                    $peer = $this->genAll($messageMedia, \danog\MadelineProto\API::INFO_TYPE_ID);
                 } else {
-                    $peer = $this->getInfo($messageMedia, \danog\MadelineProto\API::INFO_TYPE_PEER);
+                    $peer = $this->getInfo($messageMedia, \danog\MadelineProto\API::INFO_TYPE_ID);
                 }
                 $res['InputFileLocation'] = [
                     '_' => 'inputPeerPhotoFileLocation',
@@ -1044,7 +1080,7 @@ trait Files
                 });
             };
         }
-        if ($end === -1 && isset($messageMedia['size'])) {
+        if ($end === -1 && isset($messageMedia['size']) && $messageMedia['size'] !== 0) {
             $end = $messageMedia['size'];
         }
         $part_size ??= 1024 * 1024;
@@ -1110,17 +1146,17 @@ trait Files
             $origCb(100, 0, 0);
             return;
         }
-        $parallel_chunks = $seekable ? $parallel_chunks : 1;
+        $parallel_chunks = $seekable ? $parallel_chunks : 2;
         if ($params) {
             $previous_promise = true;
             $promises = [];
             foreach ($params as $key => $param) {
                 $cancellation?->throwIfRequested();
                 $param['previous_promise'] = $previous_promise;
-                $previous_promise = async($this->downloadPart(...), $messageMedia, $cdn, $datacenter, $old_dc, $ige, $cb, $param, $callable, $seekable, $cancellation);
+                $previous_promise = async($this->downloadPart(...), $messageMedia, $cdn, $datacenter, $old_dc, $ige, $cb, $param, $callable, $seekable, $cancellation)->ignore();
                 $previous_promise->map(static function (int $res) use (&$size): void {
                     $size += $res;
-                });
+                })->ignore();
                 $promises[] = $previous_promise;
                 if (\count($promises) === $parallel_chunks) {
                     // 20 mb at a time, for a typical bandwidth of 1gbps
@@ -1186,17 +1222,14 @@ trait Files
                     break;
                 } catch (FileRedirect $e) {
                     $datacenter = $e->dc;
-                } catch (FloodWaitError $e) {
+                } catch (FloodWaitError) {
                     delay(1, cancellation: $cancellation);
-                } catch (RPCErrorException $e) {
-                    switch ($e->rpc) {
-                        case 'FILE_TOKEN_INVALID':
-                            $cdn = false;
-                            $datacenter = $this->authorized_dc;
-                            continue 3;
-                        default:
-                            throw $e;
-                    }
+                } catch (FloodPremiumWaitError $e) {
+                    $e->wait($cancellation);
+                } catch (FileTokenInvalidError) {
+                    $cdn = false;
+                    $datacenter = $this->authorized_dc;
+                    continue 2;
                 }
             } while (true);
             $cancellation?->throwIfRequested();
@@ -1219,16 +1252,10 @@ trait Files
                 $this->getConfig();
                 try {
                     $this->addCdnHashes($messageMedia['file_token'], $this->methodCallAsyncRead('upload.reuploadCdnFile', ['file_token' => $messageMedia['file_token'], 'request_token' => $res['request_token'], 'cancellation' => $cancellation], $this->authorized_dc));
-                } catch (RPCErrorException $e) {
-                    switch ($e->rpc) {
-                        case 'FILE_TOKEN_INVALID':
-                        case 'REQUEST_TOKEN_INVALID':
-                            $cdn = false;
-                            $datacenter = $this->authorized_dc;
-                            continue 2;
-                        default:
-                            throw $e;
-                    }
+                } catch (FileTokenInvalidError|RequestTokenInvalidError) {
+                    $cdn = false;
+                    $datacenter = $this->authorized_dc;
+                    continue;
                 }
                 continue;
             }

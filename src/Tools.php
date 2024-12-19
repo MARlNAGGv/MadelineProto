@@ -29,9 +29,11 @@ use Amp\File\File;
 use Amp\Http\Client\HttpClient;
 use Amp\Http\Client\HttpClientBuilder;
 use Amp\Http\Client\Request;
+use Amp\Process\Process;
 use ArrayAccess;
 use Closure;
 use Countable;
+use danog\DialogId\DialogId;
 use Fiber;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr\FuncCall;
@@ -55,16 +57,15 @@ use PhpParser\ParserFactory;
 use phpseclib3\Crypt\Random;
 use ReflectionClass;
 use Traversable;
+
 use Webmozart\Assert\Assert;
 
 use const DIRECTORY_SEPARATOR;
-
 use const PHP_INT_MAX;
 use const PHP_SAPI;
-use const STR_PAD_RIGHT;
 
+use const STR_PAD_RIGHT;
 use function Amp\File\openFile;
-use function Amp\File\read;
 use function unpack;
 
 /**
@@ -155,20 +156,30 @@ abstract class Tools extends AsyncTools
         array_walk($input, $cb);
         return $input;
     }
+    private static function uRShift(int $a, int $b): int
+    {
+        if($b == 0) {
+            return $a;
+        }
+        return ($a >> $b) & ~(1<<(8*PHP_INT_SIZE-1)>>($b-1));
+    }
     /**
      * Generate MTProto vector hash.
      *
      * Returns a vector hash.
      *
-     * @param array $longs IDs
+     * @param array<string|int> $longs IDs
      */
     public static function genVectorHash(array $longs): string
     {
         $hash = 0;
         foreach ($longs as $long) {
-            $hash ^= $hash >> 21;
+            if (\is_string($long)) {
+                $long = self::unpackSignedLong(strrev(substr(md5($long, true), 0, 8)));
+            }
+            $hash ^= self::uRShift($hash, 21);
             $hash ^= $hash << 35;
-            $hash ^= $hash >> 4;
+            $hash ^= self::uRShift($hash, 4);
             $hash = $hash + $long;
         }
         return self::packSignedLong($hash);
@@ -471,6 +482,8 @@ abstract class Tools extends AsyncTools
     /**
      * Get maximum photo size.
      *
+     * @param array<array{w: int, h: int, type: string, ...}> $sizes
+     *
      * @internal
      */
     public static function maxSize(array $sizes): array
@@ -496,7 +509,7 @@ abstract class Tools extends AsyncTools
                 }
             }
         }
-        Assert::isArray($max);
+        \assert($max !== null);
         return $max;
     }
     /**
@@ -573,7 +586,7 @@ abstract class Tools extends AsyncTools
      * Parse t.me link.
      *
      * @internal
-     * @return array{0: bool, 1: string}|null
+     * @return array{0: bool, 1: string|int}|null
      */
     public static function parseLink(string $link): array|null
     {
@@ -582,8 +595,17 @@ abstract class Tools extends AsyncTools
                 return [false, $matches[1]];
             }
         }
+        // t.me/c/<channelId>
+        if (preg_match('@t\.me/c/(\d+)@', $link, $matches)) {
+            return [false, DialogId::fromSupergroupOrChannelId((int) $matches[1])];
+        }
+        // Invite links
         if (preg_match('@(?:t|telegram)\\.(?:me|dog)/(joinchat/|\+)?([a-z0-9_-]*)@i', $link, $matches)) {
             return [!!$matches[1], $matches[2]];
+        }
+        // Deep Link
+        if (preg_match('@tg://(?:resolve|openmessage|user)\?(?:domain|userid|id)=([a-z0-9_-]+)@i', $link, $matches)) {
+            return [false, (int) $matches[1]];
         }
         return null;
     }
@@ -622,6 +644,7 @@ abstract class Tools extends AsyncTools
             self::$client ??= HttpClientBuilder::buildDefault();
             $request = new Request($stream->url);
             $request->setTransferTimeout(INF);
+            $request->setInactivityTimeout(INF);
             $stream = self::$client->request(
                 $request,
                 $cancellation
@@ -699,8 +722,8 @@ abstract class Tools extends AsyncTools
         }
         $plugin = is_subclass_of($class, PluginEventHandler::class);
         $file = (new ReflectionClass($class))->getFileName();
-        $code = read($file);
-        $code = (new ParserFactory)->create(ParserFactory::ONLY_PHP7)->parse($code);
+        $code = file_get_contents($file);
+        $code = (new ParserFactory)->createForNewestSupportedVersion()->parse($code);
         Assert::notNull($code);
         $traverser = new NodeTraverser;
         $traverser->addVisitor(new NameResolver());
@@ -888,11 +911,30 @@ abstract class Tools extends AsyncTools
             return self::$canConvert;
         }
         try {
-            Ogg::convert(new LocalFile(__DIR__.'/empty.wav'), new WritableBuffer);
+            Ogg::convert(new ReadableBuffer(file_get_contents(__DIR__.'/empty.wav')), new WritableBuffer);
             self::$canConvert = true;
         } catch (\Throwable $e) {
+            Logger::log("An error occurred while attempting conversion: $e");
             self::$canConvert = false;
         }
         return self::$canConvert;
+    }
+
+    private static ?bool $canFFmpeg = null;
+    /**
+     * Whether we can convert any audio/video file using ffmpeg.
+     */
+    public static function canUseFFmpeg(?Cancellation $cancellation = null): bool
+    {
+        if (self::$canFFmpeg !== null) {
+            return self::$canFFmpeg;
+        }
+        try {
+            self::$canFFmpeg = Process::start('ffmpeg -version', cancellation: $cancellation)->join($cancellation) === 0;
+        } catch (\Throwable $e) {
+            Logger::log("An error occurred while attempting conversion: $e");
+            self::$canFFmpeg = false;
+        }
+        return self::$canFFmpeg;
     }
 }

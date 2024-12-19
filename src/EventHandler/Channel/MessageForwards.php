@@ -18,7 +18,6 @@ namespace danog\MadelineProto\EventHandler\Channel;
 
 use danog\MadelineProto\EventHandler\Update;
 use danog\MadelineProto\MTProto;
-use danog\MadelineProto\MTProtoTools\DialogId;
 
 /**
  * Indicates that the forward counter of a message in a channel has changed.
@@ -38,7 +37,7 @@ final class MessageForwards extends Update
     public function __construct(MTProto $API, array $rawMessageViews)
     {
         parent::__construct($API);
-        $this->chatId = DialogId::fromSupergroupOrChannel($rawMessageViews['channel_id']);
+        $this->chatId = $rawMessageViews['channel_id'];
         $this->id = $rawMessageViews['id'];
         $this->forwards = $rawMessageViews['forwards'];
     }

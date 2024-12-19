@@ -21,6 +21,8 @@ declare(strict_types=1);
 namespace danog\MadelineProto\VoIP;
 
 use Amp\ByteStream\ReadableStream;
+use Amp\ByteStream\WritableStream;
+use Amp\Cancellation;
 use Amp\DeferredFuture;
 use AssertionError;
 use danog\MadelineProto\LocalFile;
@@ -28,7 +30,6 @@ use danog\MadelineProto\Logger;
 use danog\MadelineProto\Magic;
 use danog\MadelineProto\MTProtoTools\Crypt;
 use danog\MadelineProto\Ogg;
-use danog\MadelineProto\PeerNotInDbException;
 use danog\MadelineProto\RemoteUrl;
 use danog\MadelineProto\Tools;
 use danog\MadelineProto\VoIP;
@@ -61,8 +62,8 @@ trait AuthKeyHandler
     public function requestCall(mixed $user): VoIP
     {
         $user = ($this->getInfo($user));
-        if (!isset($user['InputUser']) || $user['InputUser']['_'] === 'inputUserSelf') {
-            throw new PeerNotInDbException();
+        if ($user['type'] !== 'user') {
+            throw new AssertionError("Can only create a call with a user!");
         }
         $user = $user['bot_api_id'];
         if (isset($this->pendingCalls[$user])) {
@@ -121,9 +122,9 @@ trait AuthKeyHandler
     /**
      * Accept call.
      */
-    public function acceptCall(int $id): void
+    public function acceptCall(int $id, ?Cancellation $cancellation = null): void
     {
-        ($this->calls[$id] ?? null)?->accept();
+        ($this->calls[$id] ?? null)?->accept($cancellation);
     }
 
     /**
@@ -176,6 +177,16 @@ trait AuthKeyHandler
             }
         }
         ($this->calls[$id] ?? null)?->play($file);
+    }
+
+    /**
+     * Set output file or stream for incoming OPUS audio packets in a call.
+     *
+     * Will write an OGG OPUS stream to the specified file or stream.
+     */
+    public function callSetOutput(int $id, LocalFile|WritableStream $file): void
+    {
+        ($this->calls[$id] ?? null)?->setOutput($file);
     }
 
     /**

@@ -53,6 +53,10 @@ final class SeqLoop extends Loop
      * State.
      */
     private ?UpdatesState $state = null;
+    public function __sleep(): array
+    {
+        return ['incomingUpdates', 'feeder', 'API', 'state'];
+    }
     /**
      * Main loop.
      */
@@ -94,11 +98,11 @@ final class SeqLoop extends Loop
             $result = $this->state->checkSeq($seq_start);
             if ($result > 0) {
                 $this->API->logger('Seq hole. seq_start: '.$seq_start.' != cur seq: '.($this->state->seq() + 1), Logger::ERROR);
-                delay(1);
-                if (!$this->incomingUpdates) {
-                    $this->API->updaters[UpdateLoop::GENERIC]->resume();
-                }
-                $this->incomingUpdates = array_merge($this->incomingUpdates, [$update], $updates);
+                //delay(1);
+                //if (!$this->incomingUpdates) {
+                $this->API->updaters[UpdateLoop::GENERIC]->resume();
+                //}
+                //$this->incomingUpdates = array_merge($this->incomingUpdates, [$update], $updates);
                 continue;
             }
             if ($result < 0) {

@@ -2,7 +2,7 @@
 /**
  * Example bot.
  *
- * PHP 8.1.15+ or 8.2.4+ is required.
+ * PHP 8.2.4+ is required.
  *
  * Copyright 2016-2020 Daniil Gentili
  * (https://daniil.it)
@@ -29,6 +29,7 @@ use danog\MadelineProto\EventHandler\Filter\FilterRegex;
 use danog\MadelineProto\EventHandler\Filter\FilterText;
 use danog\MadelineProto\EventHandler\Filter\FilterTextCaseInsensitive;
 use danog\MadelineProto\EventHandler\Message;
+use danog\MadelineProto\EventHandler\Message\ChannelMessage;
 use danog\MadelineProto\EventHandler\Message\Service\DialogPhotoChanged;
 use danog\MadelineProto\EventHandler\Plugin\RestartPlugin;
 use danog\MadelineProto\EventHandler\SimpleFilter\FromAdmin;
@@ -43,6 +44,8 @@ use danog\MadelineProto\Settings\Database\Postgres;
 use danog\MadelineProto\Settings\Database\Redis;
 use danog\MadelineProto\SimpleEventHandler;
 use danog\MadelineProto\VoIP;
+
+use function Amp\Socket\SocketAddress\fromString;
 
 // MadelineProto is already loaded
 if (class_exists(API::class)) {
@@ -169,36 +172,18 @@ class MyEventHandler extends SimpleEventHandler
     }
 
     /**
-     * Downloads all telegram stories of a user (including protected ones).
-     *
-     * The bot must be started via web for this command to work.
-     *
-     * You can also start it via CLI but you'll have to specify a download script URL in the settings: https://docs.madelineproto.xyz/docs/FILES.html#getting-a-download-link-cli-bots.
+     * Automatically sends a comment to all new incoming channel posts.
      */
-    #[FilterCommand('dlStories')]
-    public function dlStoriesCommand(Message $message): void
+    #[Handler]
+    public function makeComment(Incoming&ChannelMessage $message): void
     {
-        if (!$message->commandArgs) {
-            $message->reply("You must specify the @username or the Telegram ID of a user to download their stories!");
+        if ($this->isSelfBot()) {
             return;
         }
-
-        $stories = $this->stories->getUserStories(user_id: $message->commandArgs[0])['stories']['stories'];
-        // Skip deleted stories
-        $stories = array_filter($stories, static fn (array $s): bool => $s['_'] === 'storyItem');
-        // Sort by date
-        usort($stories, static fn ($a, $b) => $a['date'] <=> $b['date']);
-
-        $result = "Total stories: ".count($stories)."\n\n";
-        foreach ($stories as $story) {
-            $cur = "- ID {$story['id']}, posted ".date(DATE_RFC850, $story['date']);
-            if (isset($story['caption'])) {
-                $cur .= ', "'.self::markdownEscape($story['caption']).'"';
-            }
-            $result .= "$cur; [click here to download »]({$this->getDownloadLink($story)})\n";
-        }
-
-        $message->reply($result, parseMode: ParseMode::MARKDOWN);
+        $message->getDiscussion()->reply(
+            message: "This comment is powered by [MadelineProto](https://t.me/MadelineProto)!",
+            parseMode: ParseMode::MARKDOWN
+        );
     }
 
     #[FilterCommand('broadcast')]
@@ -326,6 +311,29 @@ $settings->getLogger()->setLevel(Logger::LEVEL_ULTRA_VERBOSE);
 // $settings->setDb((new Redis)->setDatabase(0)->setPassword('pony'));
 // $settings->setDb((new Postgres)->setDatabase('MadelineProto')->setUsername('daniil')->setPassword('pony'));
 // $settings->setDb((new Mysql)->setDatabase('MadelineProto')->setUsername('daniil')->setPassword('pony'));
+
+// You can also enable collection of additional prometheus metrics.
+// $settings->getMetrics()->setEnablePrometheusCollection(true);
+
+// You can also enable collection of additional memory profiling metrics.
+// Note: you must also set the MEMPROF_PROFILE=1 environment variable or GET parameter.
+// $settings->getMetrics()->setEnableMemprofCollection(true);
+
+// Metrics can be returned by an autoconfigured http://127.0.0.1:12345 HTTP server.
+//
+// Endpoints:
+//
+// /metrics - Prometheus metrics
+// /debug/pprof - PProf memory profile for pyroscope
+//
+// $settings->getMetrics()->setMetricsBindTo(fromString("127.0.0.1:12345"));
+
+// Metrics can also be returned by the current script via web, if called with a specific query string:
+//
+// ?metrics - Prometheus metrics
+// ?pprof - PProf memory profile for pyroscope
+//
+// $settings->getMetrics()->setReturnMetricsFromStartAndLoop(true);
 
 // For users or bots
 MyEventHandler::startAndLoop('bot.madeline', $settings);

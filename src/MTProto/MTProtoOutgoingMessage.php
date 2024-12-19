@@ -24,6 +24,7 @@ use Amp\Cancellation;
 use Amp\CancelledException;
 use Amp\DeferredFuture;
 use Amp\Future;
+use danog\MadelineProto\Connection;
 use danog\MadelineProto\Exception;
 use Revolt\EventLoop;
 use Throwable;
@@ -103,6 +104,7 @@ class MTProtoOutgoingMessage extends MTProtoMessage
      * @param boolean                 $unencrypted Is this an unencrypted message?
      */
     public function __construct(
+        private readonly Connection $connection,
         private ?array $body,
         public readonly string $constructor,
         public readonly string $type,
@@ -121,13 +123,39 @@ class MTProtoOutgoingMessage extends MTProtoMessage
          * Custom flood wait limit for this message.
          */
         public readonly ?int $floodWaitLimit = null,
+        public readonly ?int $takeoutId = null,
+        public readonly ?string $businessConnectionId = null,
         private ?DeferredFuture $resultDeferred = null,
         public readonly ?Cancellation $cancellation = null
     ) {
         $this->userRelated = $constructor === 'users.getUsers' && $body === ['id' => [['_' => 'inputUserSelf']]] || $constructor === 'auth.exportAuthorization' || $constructor === 'updates.getDifference';
 
         parent::__construct(!isset(MTProtoMessage::NOT_CONTENT_RELATED[$constructor]));
-        $cancellation?->subscribe(fn (CancelledException $e) => $this->reply(static fn () => throw $e));
+
+        $cancellation?->subscribe(function (CancelledException $e): void {
+            if ($this->hasReply()) {
+                return;
+            }
+            if (!$this->wasSent()) {
+                $this->reply(static fn () => throw $e);
+                return;
+            }
+            $this->reply(static fn () => throw $e);
+
+            $this->connection->requestResponse?->inc([
+                'method' => $this->constructor,
+                'error_message' => 'Request Timeout',
+                'error_code' => '408',
+            ]);
+
+            if ($this->hasMsgId()) {
+                $this->connection->API->logger("Cancelling $this...");
+                $this->connection->API->logger($this->connection->methodCallAsyncRead(
+                    'rpc_drop_answer',
+                    ['req_msg_id' => $this->getMsgId()]
+                ));
+            }
+        });
     }
 
     /**
@@ -153,11 +181,13 @@ class MTProtoOutgoingMessage extends MTProtoMessage
      */
     public function sent(): void
     {
-        if ($this->state & self::STATE_REPLIED) {
-            //throw new Exception("Trying to resend already replied message $this!");
+        if ($this->sent === null && $this->isMethod) {
+            $this->connection->inFlightGauge?->inc([
+                'method' => $this->constructor,
+            ]);
         }
         $this->state |= self::STATE_SENT;
-        $this->sent = time();
+        $this->sent = hrtime(true);
         if (isset($this->sendDeferred)) {
             $sendDeferred = $this->sendDeferred;
             $this->sendDeferred = null;
@@ -176,12 +206,24 @@ class MTProtoOutgoingMessage extends MTProtoMessage
             // It can happen, no big deal
             return;
         }
-        $this->serializedBody = null;
-        $this->body = null;
-
         if (!($this->state & self::STATE_SENT)) {
             $this->sent();
         }
+
+        if ($this->isMethod) {
+            $this->connection->inFlightGauge?->dec([
+                'method' => $this->constructor,
+            ]);
+            if (!\is_callable($result)) {
+                $this->connection->requestLatencies?->observe(
+                    hrtime(true) - $this->sent,
+                    ['method' => $this->constructor]
+                );
+            }
+        }
+
+        $this->serializedBody = null;
+        $this->body = null;
 
         $this->state |= self::STATE_REPLIED;
         if ($this->resultDeferred) { // Sometimes can get an RPC error for constructors
@@ -252,14 +294,6 @@ class MTProtoOutgoingMessage extends MTProtoMessage
     public function getTries(): int
     {
         return $this->tries;
-    }
-
-    /**
-     * Get constructor name.
-     */
-    public function getConstructor(): string
-    {
-        return $this->constructor;
     }
 
     /**
@@ -339,7 +373,7 @@ class MTProtoOutgoingMessage extends MTProtoMessage
         } elseif ($this->state & self::STATE_ACKED) {
             $state = 'acked';
         } elseif ($this->state & self::STATE_SENT) {
-            $state = 'sent '.(time() - $this->sent).' seconds ago';
+            $state = 'sent '.((hrtime(true) - $this->sent) / 1_000_000_000).' seconds ago';
         } else {
             $state = 'pending';
         }

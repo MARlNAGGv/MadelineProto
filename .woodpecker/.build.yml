@@ -1,11 +1,6 @@
 matrix:
   php:
     - "8.1"
-  platform:
-    - linux/aarch64
-
-labels:
-  platform: ${platform}
 
 clone:
   git:
@@ -28,16 +23,20 @@ steps:
       event:
         - tag
         - push
-    secrets:
-      - GITHUB_TOKEN
-      - API_ID
-      - API_HASH
-      - BOT_TOKEN
-      - DEST
     environment:
-      - PHP_VERSION=${php}
-      - PLATFORM=${platform}
+      API_ID:
+        from_secret: API_ID
+      API_HASH:
+        from_secret: API_HASH
+      DEST:
+        from_secret: DEST
+      BOT_TOKEN:
+        from_secret: BOT_TOKEN
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
     commands:
+      - export PLATFORM=${platform}
+      - export PHP_VERSION=${php}
       - apk add bash
       - /bin/bash -e tests/makephar.sh
 
@@ -45,17 +44,17 @@ services:
   mariadb:
     image: mariadb
     environment:
-      - MARIADB_DATABASE=MadelineProto
-      - MARIADB_USER=MadelineProto
-      - MARIADB_PASSWORD=test
-      - MARIADB_RANDOM_ROOT_PASSWORD=yes
+      MARIADB_DATABASE: MadelineProto
+      MARIADB_USER: MadelineProto
+      MARIADB_PASSWORD: test
+      MARIADB_RANDOM_ROOT_PASSWORD: yes
 
   postgres:
     image: postgres
     environment:
-      - POSTGRES_DB=MadelineProto
-      - POSTGRES_USER=MadelineProto
-      - POSTGRES_PASSWORD=test
+      POSTGRES_DB: MadelineProto
+      POSTGRES_USER: MadelineProto
+      POSTGRES_PASSWORD: test
 
   redis:
     image: redis

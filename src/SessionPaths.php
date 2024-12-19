@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto;
 
+use AssertionError;
 use danog\MadelineProto\Ipc\IpcState;
 
 use const LOCK_EX;
@@ -44,6 +45,13 @@ use function Amp\File\write;
  */
 final class SessionPaths
 {
+    /**
+     * Header for session files.
+     */
+    private const PHP_HEADER = '<?php __HALT_COMPILER();';
+    private const VERSION_OLD = 2;
+    private const VERSION_SERIALIZATION_AWARE = 3;
+
     /**
      * Session directory path.
      */
@@ -94,8 +102,15 @@ final class SessionPaths
         $this->ipcStatePath = $session.DIRECTORY_SEPARATOR."ipcState.php";
         if (!exists($session)) {
             createDirectory($session);
-            return;
         }
+
+        $session = realpath($session);
+        if (str_starts_with($session, '/storage/emulated/')
+            || str_starts_with($session, '/sdcard/')
+        ) {
+            throw new AssertionError("The MadelineProto session folder cannot be stored in /sdcard, please move the session folder to the termux \$HOME folder, see here for more info: https://wiki.termux.com/wiki/Internal_and_external_storage");
+        }
+
         if (!isDirectory($session) && isFile("$session.safe.php")) {
             deleteFile($session);
             createDirectory($session);
@@ -127,7 +142,7 @@ final class SessionPaths
     /**
      * Serialize object to file.
      */
-    public function serialize(object $object, string $path): void
+    public function serialize(object|string $object, string $path): void
     {
         Logger::log("Waiting for exclusive lock of $path.lock...");
         $unlock = Tools::flock("$path.lock", LOCK_EX, 0.1);
@@ -135,8 +150,8 @@ final class SessionPaths
         try {
             Logger::log("Got exclusive lock of $path.lock...");
 
-            $object = Serialization::PHP_HEADER
-                .\chr(Serialization::VERSION_SERIALIZATION_AWARE)
+            $object = self::PHP_HEADER
+                .\chr(self::VERSION_SERIALIZATION_AWARE)
                 .\chr(PHP_MAJOR_VERSION)
                 .\chr(PHP_MINOR_VERSION)
                 .\chr(Magic::$can_use_igbinary ? 1 : 0)
@@ -158,14 +173,14 @@ final class SessionPaths
      *
      * @param string $path Object path, defaults to session path
      */
-    public function unserialize(string $path = ''): ?object
+    public function unserialize(string $path = ''): object|string|null
     {
         $path = $path ?: $this->sessionPath;
 
         if (!exists($path)) {
             return null;
         }
-        $headerLen = \strlen(Serialization::PHP_HEADER);
+        $headerLen = \strlen(self::PHP_HEADER);
 
         Logger::log("Waiting for shared lock of $path.lock...", Logger::ULTRA_VERBOSE);
         $unlock = Tools::flock("$path.lock", LOCK_SH, 0.1);
@@ -180,7 +195,7 @@ final class SessionPaths
 
             $file->seek($headerLen++);
             $v = \ord($file->read(null, 1));
-            if ($v >= Serialization::VERSION_OLD) {
+            if ($v >= self::VERSION_OLD) {
                 $php = $file->read(null, 2);
                 $major = \ord($php[0]);
                 $minor = \ord($php[1]);
@@ -190,7 +205,7 @@ final class SessionPaths
                 $headerLen += 2;
             }
             $igbinary = false;
-            if ($v >= Serialization::VERSION_SERIALIZATION_AWARE) {
+            if ($v >= self::VERSION_SERIALIZATION_AWARE) {
                 $igbinary = (bool) \ord($file->read(null, 1));
                 if ($igbinary && !Magic::$can_use_igbinary) {
                     throw Exception::extension('igbinary');

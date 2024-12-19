@@ -51,7 +51,11 @@ trait Common
     /**
      * Network-related timeouts.
      */
-    private float $timeout;
+    private int $timeout;
+    /**
+     * Network-related timeouts.
+     */
+    private float $timeoutSeconds;
     /**
      * Constructor function.
      */
@@ -61,6 +65,7 @@ trait Common
         $this->connection = $connection;
         $this->datacenter = $connection->getDatacenterID();
         $this->shared = $connection->getShared();
-        $this->timeout = $this->shared->getSettings()->getTimeout();
+        $this->timeoutSeconds = $this->shared->getSettings()->getTimeout();
+        $this->timeout = (int) ($this->timeoutSeconds * 1_000_000_000.0);
     }
 }

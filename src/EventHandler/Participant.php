@@ -16,6 +16,13 @@
 
 namespace danog\MadelineProto\EventHandler;
 
+use AssertionError;
+use danog\MadelineProto\EventHandler\Participant\Admin;
+use danog\MadelineProto\EventHandler\Participant\Banned;
+use danog\MadelineProto\EventHandler\Participant\Creator;
+use danog\MadelineProto\EventHandler\Participant\Left;
+use danog\MadelineProto\EventHandler\Participant\Member;
+use danog\MadelineProto\EventHandler\Participant\MySelf;
 use JsonSerializable;
 use ReflectionClass;
 use ReflectionProperty;
@@ -25,6 +32,19 @@ use ReflectionProperty;
  */
 abstract class Participant implements JsonSerializable
 {
+    public static function fromRawParticipant(array $rawParticipant): self
+    {
+        return match ($rawParticipant['_']) {
+            'channelParticipant'        => new Member($rawParticipant),
+            'channelParticipantLeft'    => new Left($rawParticipant),
+            'channelParticipantSelf'    => new MySelf($rawParticipant),
+            'channelParticipantAdmin'   => new Admin($rawParticipant),
+            'channelParticipantBanned'  => new Banned($rawParticipant),
+            'channelParticipantCreator' => new Creator($rawParticipant),
+            default => throw new AssertionError("undefined Participant type: {$rawParticipant['_']}")
+        };
+    }
+
     /** @internal */
     public function jsonSerialize(): mixed
     {

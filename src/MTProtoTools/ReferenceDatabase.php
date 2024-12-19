@@ -21,9 +21,12 @@ declare(strict_types=1);
 namespace danog\MadelineProto\MTProtoTools;
 
 use Amp\Sync\LocalKeyedMutex;
-use danog\MadelineProto\Db\DbArray;
-use danog\MadelineProto\Db\DbPropertiesTrait;
+use danog\AsyncOrm\Annotations\OrmMappedArray;
+use danog\AsyncOrm\DbArray;
+use danog\AsyncOrm\KeyType;
+use danog\AsyncOrm\ValueType;
 use danog\MadelineProto\Exception;
+use danog\MadelineProto\LegacyMigrator;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
@@ -39,12 +42,8 @@ use Webmozart\Assert\Assert;
  */
 final class ReferenceDatabase implements TLCallback
 {
-    use DbPropertiesTrait;
+    use LegacyMigrator;
 
-    protected function getDbPrefix(): string
-    {
-        return $this->API->getDbPrefix();
-    }
     // Reference from a document
     public const DOCUMENT_LOCATION = 0;
     // Reference from a photo
@@ -78,8 +77,10 @@ final class ReferenceDatabase implements TLCallback
     private const V = 1;
     /**
      * References indexed by location.
+     * @var DbArray<string, array>
      */
-    private DbArray $db;
+    #[OrmMappedArray(KeyType::STRING, ValueType::SCALAR)]
+    private $db;
     /**
      * @var array<string, list{string, int, array}>
      */
@@ -90,15 +91,6 @@ final class ReferenceDatabase implements TLCallback
     private bool $refresh = false;
     private int $refreshCount = 0;
     private int $v = 0;
-
-    /**
-     * List of properties stored in database (memory or external).
-     *
-     * @see DbPropertiesFactory
-     */
-    protected static array $dbProperties = [
-        'db' => ['innerMadelineProto' => true],
-    ];
 
     private LocalKeyedMutex $flushMutex;
     public function __construct(private MTProto $API)
@@ -116,7 +108,7 @@ final class ReferenceDatabase implements TLCallback
     }
     public function init(): void
     {
-        $this->initDb($this->API);
+        $this->initDbProperties($this->API->getDbSettings(), $this->API->getDbPrefix().'_ReferenceDatabase_');
         if ($this->v === 0) {
             $this->db->clear();
             $this->pendingDb = [];
@@ -184,6 +176,17 @@ final class ReferenceDatabase implements TLCallback
         return [];
     }
 
+    public function reset(): void
+    {
+        if ($this->cache) {
+            $this->API->logger('Found '.\count($this->cache).' pending contexts', Logger::ERROR);
+            $this->cache = [];
+        }
+        if ($this->cacheContexts) {
+            $this->API->logger('Found '.\count($this->cacheContexts).' pending contexts', Logger::ERROR);
+            $this->cacheContexts = [];
+        }
+    }
     public function addReference(array $location): bool
     {
         if (!$this->cacheContexts) {
@@ -308,11 +311,11 @@ final class ReferenceDatabase implements TLCallback
                 break;
             case 'chatFull':
             case 'chat':
-                $origin['peer'] = -$data['id'];
+                $origin['peer'] = $data['id'];
                 break;
             case 'channelFull':
             case 'channel':
-                $origin['peer'] = DialogId::fromSupergroupOrChannel($data['id']);
+                $origin['peer'] = $data['id'];
                 break;
             case 'document':
                 foreach ($data['attributes'] as $attribute) {
@@ -355,7 +358,7 @@ final class ReferenceDatabase implements TLCallback
     public function addOriginMethod(MTProtoOutgoingMessage $data, array $res): void
     {
         $key = \count($this->cacheContexts) - 1;
-        $constructor = $data->getConstructor();
+        $constructor = $data->constructor;
         if ($key === -1) {
             throw new Exception("Trying to add origin to method $constructor with no origin context set");
         }
@@ -367,7 +370,7 @@ final class ReferenceDatabase implements TLCallback
         $cache = $this->cache[$key];
         unset($this->cache[$key]);
         $origin = [];
-        switch ($data->getConstructor()) {
+        switch ($data->constructor) {
             case 'photos.updateProfilePhoto':
                 $origin['max_id'] = $res['photo_id'] ?? 0;
                 $origin['offset'] = -1;
@@ -441,19 +444,23 @@ final class ReferenceDatabase implements TLCallback
 
         EventLoop::queue($this->flush(...), $location);
     }
-    public function refreshNext(bool $refresh = false): void
+    public function refreshNextEnable(): void
     {
-        if ($this->refreshCount === 1 && !$refresh) {
-            $this->refreshed = [];
-            $this->refreshCount--;
-            $this->refresh = false;
-        } elseif ($this->refreshCount === 0 && $refresh) {
+        if ($this->refreshCount === 0) {
             $this->refreshed = [];
             $this->refreshCount++;
             $this->refresh = true;
-        } elseif ($this->refreshCount === 0 && !$refresh) {
-        } elseif ($refresh) {
+        } else {
             $this->refreshCount++;
+        }
+    }
+    public function refreshNextDisable(): void
+    {
+        if ($this->refreshCount === 1) {
+            $this->refreshed = [];
+            $this->refreshCount--;
+            $this->refresh = false;
+        } elseif ($this->refreshCount === 0) {
         } else {
             $this->refreshCount--;
         }

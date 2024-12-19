@@ -40,7 +40,7 @@ use function strlen;
  */
 final class WriteLoop extends Loop
 {
-    public const MAX_COUNT = 1020;
+    private const MAX_COUNT = 1020;
     private const MAX_SIZE = 1 << 15;
     public const MAX_IDS = 8192;
 
@@ -62,7 +62,7 @@ final class WriteLoop extends Loop
             }
             if ($please_wait) {
                 $this->API->logger("Have to wait for handshake, pausing in $this...", Logger::ULTRA_VERBOSE);
-                return self::PAUSE;
+                return 1.0;
             }
             $this->connection->writing(true);
             try {
@@ -102,6 +102,7 @@ final class WriteLoop extends Loop
                 }
                 if ($message->getState() & MTProtoOutgoingMessage::STATE_REPLIED) {
                     unset($this->connection->pendingOutgoing[$k]);
+                    $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                     continue;
                 }
                 $skipped_all = false;
@@ -111,13 +112,15 @@ final class WriteLoop extends Loop
                 $pad_length = -$length & 15;
                 $pad_length += 16 * Tools::randomInt(modulus: 16);
                 $pad = Tools::random($pad_length);
-                $buffer = $this->connection->stream->getWriteBuffer(8 + 8 + 4 + $pad_length + $length);
+                $buffer = $this->connection->stream->getWriteBuffer($total_len = 8 + 8 + 4 + $pad_length + $length);
                 $buffer->bufferWrite("\0\0\0\0\0\0\0\0".Tools::packSignedLong($message_id).Tools::packUnsignedInt($length).$message->getSerializedBody().$pad);
                 $this->connection->httpSent();
+                $this->connection->outgoingBytesCtr?->incBy($total_len);
 
                 $this->API->logger("Sent $message as unencrypted message to DC $this->datacenter!", Logger::ULTRA_VERBOSE);
 
                 unset($this->connection->pendingOutgoing[$k]);
+                $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                 $message->setMsgId($message_id);
                 $this->connection->outgoing_messages[$message_id] = $message;
                 $this->connection->new_outgoing[$message_id] = $message;
@@ -160,14 +163,16 @@ final class WriteLoop extends Loop
                 }
                 if ($message->getState() & MTProtoOutgoingMessage::STATE_REPLIED) {
                     unset($this->connection->pendingOutgoing[$k]);
+                    $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                     $this->API->logger("Skipping resending of $message, we already got a reply in DC $this->datacenter");
                     continue;
                 }
                 if ($message instanceof Container) {
                     unset($this->connection->pendingOutgoing[$k]);
+                    $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                     continue;
                 }
-                $constructor = $message->getConstructor();
+                $constructor = $message->constructor;
                 if ($this->shared->getGenericSettings()->getAuth()->getPfs() && !$this->shared->isBound() && !$this->connection->isCDN() && $message->isMethod && !\in_array($constructor, ['http_wait', 'auth.bindTempAuthKey'], true)) {
                     $this->API->logger("Skipping $message due to unbound keys in DC $this->datacenter");
                     $skipped = true;
@@ -192,7 +197,7 @@ final class WriteLoop extends Loop
 
                 $body_length = \strlen($message->getSerializedBody());
                 $actual_length = $body_length + 32;
-                if ($total_length && $total_length + $actual_length > 32760 || $count >= 1020) {
+                if ($total_length && $total_length + $actual_length > 32760 || $count >= self::MAX_COUNT) {
                     $this->API->logger('Length overflow, postponing part of payload', Logger::ULTRA_VERBOSE);
                     break;
                 }
@@ -320,7 +325,9 @@ final class WriteLoop extends Loop
             if ($count > 1 || $has_seq) {
                 $this->API->logger("Wrapping in msg_container ({$count} messages of total size {$total_length}) as encrypted message for DC {$this->datacenter}", Logger::ULTRA_VERBOSE);
                 $message_id = $this->connection->msgIdHandler->generateMessageId();
-                $this->connection->pendingOutgoing[$this->connection->pendingOutgoingKey] = new Container(array_values($keys));
+                $this->connection->pendingOutgoing[$this->connection->pendingOutgoingKey] = new Container($this->connection, array_values($keys));
+                $this->connection->outgoingCtr?->inc();
+                $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
                 $keys[$this->connection->pendingOutgoingKey++] = $message_id;
                 $message_data = $this->API->getTL()->serializeObject(['type' => ''], ['_' => 'msg_container', 'messages' => $messages], 'container');
                 $message_data_length = \strlen($message_data);
@@ -342,12 +349,15 @@ final class WriteLoop extends Loop
                 $padding += 16;
             }
             $padding = Tools::random($padding);
-            $message_key = substr(hash('sha256', substr($this->shared->getTempAuthKey()->getAuthKey(), 88, 32).$plaintext.$padding, true), 8, 16);
+            $message_key_large = hash('sha256', substr($this->shared->getTempAuthKey()->getAuthKey(), 88, 32).$plaintext.$padding, true);
+            $message_key = substr($message_key_large, 8, 16);
+            //$ack = unpack('V', substr($message_key_large, 0, 4))[1] | (1 << 31);
             [$aes_key, $aes_iv] = Crypt::kdf($message_key, $this->shared->getTempAuthKey()->getAuthKey());
             $message = $this->shared->getTempAuthKey()->getID().$message_key.Crypt::igeEncrypt($plaintext.$padding, $aes_key, $aes_iv);
-            $buffer = $this->connection->stream->getWriteBuffer(\strlen($message));
+            $buffer = $this->connection->stream->getWriteBuffer($total_len = \strlen($message));
             $buffer->bufferWrite($message);
             $this->connection->httpSent();
+            $this->connection->outgoingBytesCtr?->incBy($total_len);
             $this->API->logger("Sent encrypted payload to DC {$this->datacenter}", Logger::ULTRA_VERBOSE);
 
             if ($ackCount) {
@@ -362,16 +372,8 @@ final class WriteLoop extends Loop
                     $this->connection->new_outgoing[$message_id] = $message;
                 }
                 $message->sent();
-                $message->cancellation?->subscribe(function () use ($message): void {
-                    if ($message->hasMsgId()) {
-                        $this->API->logger("Cancelling $message...");
-                        $this->API->logger($this->connection->methodCallAsyncRead(
-                            'rpc_drop_answer',
-                            ['req_msg_id' => $message->getMsgId()]
-                        ));
-                    }
-                });
             }
+            $this->connection->pendingOutgoingGauge?->set(\count($this->connection->pendingOutgoing));
         } while ($this->connection->pendingOutgoing && !$skipped);
         if (empty($this->connection->pendingOutgoing)) {
             $this->connection->pendingOutgoing = [];

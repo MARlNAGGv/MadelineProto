@@ -22,13 +22,13 @@ namespace danog\MadelineProto\SecretChats;
 
 use Amp\Sync\LocalKeyedMutex;
 use AssertionError;
+use danog\DialogId\DialogId;
 use danog\MadelineProto\EventHandler\Message\SecretMessage;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\Loop\Update\UpdateLoop;
 use danog\MadelineProto\MTProtoTools\Crypt;
-use danog\MadelineProto\MTProtoTools\DialogId;
-use danog\MadelineProto\PeerNotInDbException;
-use danog\MadelineProto\RPCErrorException;
+use danog\MadelineProto\RPCError\EncryptionAlreadyAcceptedError;
+use danog\MadelineProto\RPCError\EncryptionAlreadyDeclinedError;
 use danog\MadelineProto\SecretPeerNotInDbException;
 use danog\MadelineProto\SecurityException;
 use danog\MadelineProto\Tools;
@@ -64,12 +64,12 @@ trait AuthKeyHandler
      */
     public function requestSecretChat(mixed $user): int
     {
-        $user = ($this->getInfo($user));
-        if (!isset($user['InputUser'])) {
-            throw new PeerNotInDbException();
+        $user = $this->getInfo($user);
+        if ($user['type'] !== 'user') {
+            throw new AssertionError("Can only create a secret chat with a user!");
         }
-        $user = $user['InputUser'];
-        $this->logger->logger('Creating secret chat with '.$user['user_id'].'...', Logger::VERBOSE);
+        $user = $user['user_id'];
+        $this->logger->logger('Creating secret chat with '.$user.'...', Logger::VERBOSE);
         $dh_config = ($this->getDhConfig());
         $this->logger->logger('Generating a...', Logger::VERBOSE);
         $a = new BigInteger(Tools::random(256), 256);
@@ -234,8 +234,9 @@ trait AuthKeyHandler
      * Discard secret chat.
      *
      * @param int $chat Secret chat ID
+     * @param bool $deleteHistory If true, deletes the entire chat history for the other user as well.
      */
-    public function discardSecretChat(int $chat): void
+    public function discardSecretChat(int $chat, bool $deleteHistory = false): void
     {
         $this->logger->logger('Discarding secret chat '.$chat.'...', Logger::VERBOSE);
         if (isset($this->secretChats[$chat])) {
@@ -245,11 +246,8 @@ trait AuthKeyHandler
             unset($this->temp_requested_secret_chats[$chat]);
         }
         try {
-            $this->methodCallAsyncRead('messages.discardEncryption', ['chat_id' => $chat]);
-        } catch (RPCErrorException $e) {
-            if ($e->rpc !== 'ENCRYPTION_ALREADY_DECLINED') {
-                throw $e;
-            }
+            $this->methodCallAsyncRead('messages.discardEncryption', ['chat_id' => $chat, 'delete_history' => $deleteHistory]);
+        } catch (EncryptionAlreadyAcceptedError|EncryptionAlreadyDeclinedError) {
         }
     }
 }

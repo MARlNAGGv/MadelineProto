@@ -21,16 +21,13 @@ declare(strict_types=1);
 namespace danog\MadelineProto\TL\Conversion;
 
 use danog\Decoder\FileId;
-use danog\MadelineProto\Lang;
+use danog\Decoder\FileIdType;
+use danog\MadelineProto\EventHandler\Message\Entities\MessageEntity;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto;
-use danog\MadelineProto\MTProtoTools\DialogId;
 use danog\MadelineProto\StrTools;
 use danog\MadelineProto\Tools;
 use Throwable;
-
-use const danog\Decoder\ENCRYPTED;
-use const danog\Decoder\TYPES_IDS;
 
 /**
  * @internal
@@ -207,9 +204,9 @@ trait BotAPI
                 if (isset($data['fwd_from']['from_id'])) {
                     $newd['forward_from'] = ($this->getPwrChat($data['fwd_from']['from_id'], false));
                 }
-                if (isset($data['fwd_from']['channel_id'])) {
+                if (isset($data['fwd_from']) && $data['fwd_from'] < 0) {
                     try {
-                        $newd['forward_from_chat'] = $this->getPwrChat(DialogId::fromSupergroupOrChannel($data['fwd_from']['channel_id']), false);
+                        $newd['forward_from_chat'] = $this->getPwrChat($data['fwd_from'], false);
                     } catch (Throwable $e) {
                     }
                 }
@@ -230,6 +227,9 @@ trait BotAPI
                 $data['user'] = ($this->getPwrChat($data['user_id'], false));
                 unset($data['user_id']);
                 return $data;
+            case 'photo':
+                $data = ['photo' => $data];
+                // no break
             case 'messageMediaPhoto':
                 if (isset($data['caption'])) {
                     $res['caption'] = $data['caption'];
@@ -270,7 +270,7 @@ trait BotAPI
                                 $res['title'] = $attribute['title'];
                             }
                             if (isset($attribute['waveform'])) {
-                                $res['title'] = $attribute['waveform'];
+                                $res['waveform'] = $attribute['waveform'];
                             }
                             break;
                         case 'documentAttributeVideo':
@@ -320,12 +320,15 @@ trait BotAPI
                 $res['file_size'] = $data['document']['size'];
                 $res['mime_type'] = $data['document']['mime_type'];
 
-                $fileId = new FileId;
-                $fileId->setId($data['document']['id']);
-                $fileId->setAccessHash($data['document']['access_hash']);
-                $fileId->setFileReference((string) ($data['document']['file_reference'] ?? ''));
-                $fileId->setDcId($data['document']['dc_id']);
-                $fileId->setType(TYPES_IDS[$type_name]);
+                $fileId = new FileId(
+                    id: $data['document']['id'],
+                    accessHash: $data['document']['access_hash'],
+                    fileReference: $data['document']['file_reference'] === null
+                        ? null
+                        : (string) $data['document']['file_reference'],
+                    dcId: $data['document']['dc_id'],
+                    type: FileIdType::from($type_name)
+                );
 
                 $res['file_id'] = (string) $fileId;
                 $res['file_unique_id'] = $fileId->getUniqueBotAPI();
@@ -337,12 +340,13 @@ trait BotAPI
                 $data = $data['file'];
                 // no break
             case 'encryptedFile':
-                $fileId = new FileId;
-                $fileId->setId($data['id']);
-                $fileId->setAccessHash($data['access_hash']);
-                $fileId->setFileReference('');
-                $fileId->setDcId($data['dc_id']);
-                $fileId->setType(ENCRYPTED);
+                $fileId = new FileId(
+                    id: $data['id'],
+                    accessHash: $data['access_hash'],
+                    fileReference: null,
+                    dcId: $data['dc_id'],
+                    type: FileIdType::ENCRYPTED
+                );
 
                 $res = [
                     'file_id' => (string) $fileId,
@@ -360,75 +364,7 @@ trait BotAPI
      */
     public static function MTProtoEntityToBotAPI(array $data): array
     {
-        switch ($data['_']) {
-            case 'messageEntityCustomEmoji':
-                $data['type'] = 'custom_emoji';
-                $data['custom_emoji_id'] = $data['document_id'];
-                unset($data['_'], $data['document_id']);
-                return $data;
-            case 'messageEntityPhone':
-                unset($data['_']);
-                $data['type'] = 'phone_number';
-                return $data;
-            case 'messageEntityBlockquote':
-                unset($data['_']);
-                $data['type'] = 'block_quote';
-                return $data;
-            case 'messageEntityMention':
-                unset($data['_']);
-                $data['type'] = 'mention';
-                return $data;
-            case 'messageEntityHashtag':
-                unset($data['_']);
-                $data['type'] = 'hashtag';
-                return $data;
-            case 'messageEntityBotCommand':
-                unset($data['_']);
-                $data['type'] = 'bot_command';
-                return $data;
-            case 'messageEntityUrl':
-                unset($data['_']);
-                $data['type'] = 'url';
-                return $data;
-            case 'messageEntityEmail':
-                unset($data['_']);
-                $data['type'] = 'email';
-                return $data;
-            case 'messageEntityBold':
-                unset($data['_']);
-                $data['type'] = 'bold';
-                return $data;
-            case 'messageEntityStrike':
-                unset($data['_']);
-                $data['type'] = 'strikethrough';
-                return $data;
-            case 'messageEntitySpoiler':
-                unset($data['_']);
-                $data['type'] = 'spoiler';
-                return $data;
-            case 'messageEntityUnderline':
-                unset($data['_']);
-                $data['type'] = 'underline';
-                return $data;
-            case 'messageEntityItalic':
-                unset($data['_']);
-                $data['type'] = 'italic';
-                return $data;
-            case 'messageEntityCode':
-                unset($data['_']);
-                $data['type'] = 'code';
-                return $data;
-            case 'messageEntityPre':
-                unset($data['_']);
-                $data['type'] = 'pre';
-                return $data;
-            case 'messageEntityTextUrl':
-                unset($data['_']);
-                $data['type'] = 'text_url';
-                return $data;
-            default:
-                throw new Exception(sprintf(Lang::$current_lang['botapi_conversion_error'], $data['_']));
-        }
+        return MessageEntity::fromRawEntity($data)->toBotAPI();
     }
     /**
      * Convert bot API parameters to MTProto parameters.
@@ -473,12 +409,12 @@ trait BotAPI
             $arguments['parse_mode'] = str_replace('textParseMode', '', $arguments['parse_mode']['_']);
         }
         if (stripos($arguments['parse_mode'], 'markdown') !== false) {
-            $entities = new MarkdownEntities($arguments[$key]);
+            $entities = StrTools::markdownToMessageEntities($arguments[$key]);
             $arguments[$key] = $entities->message;
             $arguments['entities'] = array_merge($arguments['entities'] ?? [], $entities->entities);
             unset($arguments['parse_mode']);
         } elseif (stripos($arguments['parse_mode'], 'html') !== false) {
-            $entities = new DOMEntities($arguments[$key]);
+            $entities = StrTools::htmlToMessageEntities($arguments[$key]);
             $arguments[$key] = $entities->message;
             $arguments['entities'] = array_merge($arguments['entities'] ?? [], $entities->entities);
             unset($arguments['parse_mode']);
@@ -533,6 +469,9 @@ trait BotAPI
         $offset = 0;
         for ($k = 0; $k < \count($args['entities']); $k++) {
             $entity = $args['entities'][$k];
+            if ($entity instanceof MessageEntity) {
+                $entity = $entity->toMTProto();
+            }
             do {
                 while ($entity['offset'] > $offset + StrTools::mbStrlen($multiple_args[$i]['message'])) {
                     $offset += StrTools::mbStrlen($multiple_args[$i]['message']);

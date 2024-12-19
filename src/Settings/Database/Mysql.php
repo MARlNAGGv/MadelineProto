@@ -16,7 +16,12 @@
 
 namespace danog\MadelineProto\Settings\Database;
 
-use danog\MadelineProto\Db\MysqlArray;
+use Amp\Mysql\MysqlConfig;
+use AssertionError;
+use danog\AsyncOrm\Serializer\Igbinary;
+use danog\AsyncOrm\Serializer\Native;
+use danog\AsyncOrm\Settings;
+use danog\AsyncOrm\Settings\MysqlSettings;
 
 /**
  * MySQL backend settings.
@@ -25,8 +30,76 @@ use danog\MadelineProto\Db\MysqlArray;
  */
 final class Mysql extends SqlAbstract
 {
-    public function getDriverClass(): string
+    /**
+     * @var int<1, max>|null $optimizeIfWastedGtMb
+     */
+    private ?int $optimizeIfWastedGtMb = null;
+    /**
+     * @internal Not entirely sure whether this should be exposed.
+     *
+     * Whether to optimize MySQL tables automatically if more than the specified amount of megabytes is wasted by the MySQL engine.
+     *
+     * Be careful when tweaking this setting as it may lead to slowdowns on startup.
+     *
+     * A good setting is 10mb.
+     *
+     * @param int<1, max>|null $optimizeIfWastedGtMb
+     */
+    public function setOptimizeIfWastedGtMb(?int $optimizeIfWastedGtMb): self
     {
-        return MysqlArray::class;
+        /** @psalm-suppress DocblockTypeContradiction */
+        if ($optimizeIfWastedGtMb !== null && $optimizeIfWastedGtMb <= 0) {
+            /** @var int $optimizeIfWastedGtMb */
+            throw new AssertionError("An invalid value was specified: $optimizeIfWastedGtMb");
+        }
+        $this->optimizeIfWastedGtMb = $optimizeIfWastedGtMb;
+        return $this;
+    }
+    /**
+     * @internal Not entirely sure whether this should be exposed.
+     *
+     * Whether to optimize MySQL tables automatically if more than the specified amount of bytes is wasted by the MySQL engine.
+     *
+     * Be careful when tweaking this setting as it may lead to slowdowns on startup.
+     *
+     * A good setting is 10mb.
+     *
+     * @return int<1, max>|null
+     */
+    public function getOptimizeIfWastedGtMb(): ?int
+    {
+        return $this->optimizeIfWastedGtMb;
+    }
+
+    public function getOrmSettings(): Settings
+    {
+        $host = str_replace(['tcp://', 'unix://'], '', $this->getUri());
+        if ($host[0] === '/') {
+            $port = 0;
+        } else {
+            $host = explode(':', $host, 2);
+            if (\count($host) === 2) {
+                [$host, $port] = $host;
+            } else {
+                $host = $host[0];
+                $port = MysqlConfig::DEFAULT_PORT;
+            }
+        }
+        $config = new MysqlConfig(
+            host: $host,
+            port: (int) $port,
+            user: $this->getUsername(),
+            password: $this->getPassword(),
+            database: $this->getDatabase()
+        );
+        return new MysqlSettings(
+            $config,
+            match ($this->serializer) {
+                SerializerType::IGBINARY => new Igbinary,
+                SerializerType::SERIALIZE => new Native,
+                null => null
+            },
+            $this->cacheTtl,
+        );
     }
 }

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <psalm
-    errorLevel="2"
+    errorLevel="1"
     resolveFromConfigFile="true"
     findUnusedCode="false"
     findUnusedBaselineEntry="false"
@@ -10,27 +10,27 @@
     xmlns="https://getpsalm.org/schema/config"
     xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
     errorBaseline="psalm-baseline.xml"
+    autoloader="vendor/autoload.php"
 >
+    <enableExtensions>
+        <extension name="ffi"/>
+    </enableExtensions>
     <projectFiles>
         <directory name="src" />
         <ignoreFiles>
             <directory name="vendor" />
-            <file name="src/DocsBuilder.php" />
-            <file name="src/DocsBuilder/Methods.php" />
-            <file name="src/DocsBuilder/Constructors.php" />
-            <!-- FFI psalm bug -->
-            <file name="src/Ogg.php" />
+            <directory name="src/RPCError" />
+            <file name="src/TL/TLParser.php" />
+            <file name="src/InternalDoc.php" />
+            <file name="src/TL/SecretTLParser.php" />
         </ignoreFiles>
     </projectFiles>
     <issueHandlers>
+        <!-- Should totally go in level 1... -->
+        <RiskyTruthyFalsyComparison errorLevel="suppress" />
         <ParamNameMismatch errorLevel="suppress" />
         <StringIncrement errorLevel="suppress" />
         <InvalidTraversableImplementation errorLevel="suppress" />
         <RedundantPropertyInitializationCheck errorLevel="suppress" />
-        <MissingConstructor>
-            <errorLevel type="suppress">
-            <file name="src/InternalDoc.php" />
-            </errorLevel>
-        </MissingConstructor>
     </issueHandlers>
 </psalm>

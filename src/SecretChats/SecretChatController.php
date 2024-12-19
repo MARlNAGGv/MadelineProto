@@ -24,14 +24,17 @@ use Amp\Future;
 use Amp\Sync\LocalKeyedMutex;
 use Amp\Sync\LocalMutex;
 use AssertionError;
-use danog\MadelineProto\Db\DbArray;
-use danog\MadelineProto\Db\DbPropertiesTrait;
+use danog\AsyncOrm\Annotations\OrmMappedArray;
+use danog\AsyncOrm\DbArray;
+use danog\AsyncOrm\KeyType;
+use danog\AsyncOrm\ValueType;
+use danog\DialogId\DialogId;
+use danog\MadelineProto\LegacyMigrator;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\Loop\Secret\SecretFeedLoop;
 use danog\MadelineProto\Loop\Update\UpdateLoop;
 use danog\MadelineProto\MTProto;
 use danog\MadelineProto\MTProtoTools\Crypt;
-use danog\MadelineProto\MTProtoTools\DialogId;
 use danog\MadelineProto\ResponseException;
 use danog\MadelineProto\SecurityException;
 use danog\MadelineProto\Tools;
@@ -48,36 +51,23 @@ use Webmozart\Assert\Assert;
  */
 final class SecretChatController implements Stringable
 {
-    use DbPropertiesTrait;
-
-    protected function getDbPrefix(): string
-    {
-        return $this->API->getDbPrefix().'_'.$this->id;
-    }
-
-    /**
-     * List of properties stored in database (memory or external).
-     *
-     * @see DbPropertiesFactory
-     */
-    protected static array $dbProperties = [
-        'incoming' => ['innerMadelineProto' => true],
-        'outgoing' => ['innerMadelineProto' => true],
-        'randomIdMap' => ['innerMadelineProto' => true],
-    ];
+    use LegacyMigrator;
 
     /**
      * @var DbArray<int, array>
      */
-    private DbArray $incoming;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR)]
+    private $incoming;
     /**
      * @var DbArray<int, array>
      */
-    private DbArray $outgoing;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR)]
+    private $outgoing;
     /**
      * @var DbArray<int, list{int, bool}> Seq, outgoing
      */
-    private DbArray $randomIdMap;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR)]
+    private $randomIdMap;
     private int $in_seq_no = 0;
     private int $out_seq_no = 0;
     private int $remote_in_seq_no = 0;
@@ -150,7 +140,10 @@ final class SecretChatController implements Stringable
     }
     public function init(): void
     {
-        $this->initDb($this->API);
+        $this->initDbProperties(
+            $this->API->getDbSettings(),
+            $this->API->getDbPrefix().'_SecretChatController_'.$this->id.'_'
+        );
     }
 
     public function startFeedLoop(): void
@@ -420,21 +413,27 @@ final class SecretChatController implements Stringable
             EventLoop::queue($lock->release(...));
         }
     }
+    private static function transformDecryptedUpdate(array &$update): void
+    {
+        $decryptedMessage = &$update['message']['decrypted_message'];
+
+        $decryptedMessage['out'] = false;
+        $decryptedMessage['date'] = $update['message']['date'];
+        $decryptedMessage['chat_id'] = $update['message']['chat_id'];
+
+        if ($decryptedMessage['_'] === 'decryptedMessage'
+            && isset($decryptedMessage['media'])
+            && $decryptedMessage['media']['_'] !== 'decryptedMessageMediaEmpty'
+        ) {
+            $decryptedMessage['media']['file'] = $update['message']['file'];
+            $decryptedMessage['media']['date'] = $update['message']['date'];
+            $decryptedMessage['media']['ttl_seconds'] = $decryptedMessage['ttl'];
+        }
+    }
     private function handleDecryptedUpdate(array $update): void
     {
-        $update['message']['decrypted_message']['out'] = false;
-        $update['message']['decrypted_message']['date'] = $update['message']['date'];
-        $update['message']['decrypted_message']['chat_id'] = $update['message']['chat_id'];
-
         $decryptedMessage = $update['message']['decrypted_message'];
         if ($decryptedMessage['_'] === 'decryptedMessage') {
-            if (isset($update['message']['decrypted_message']['media'])
-                && $update['message']['decrypted_message']['media']['_'] !== 'decryptedMessageMediaEmpty'
-            ) {
-                $update['message']['decrypted_message']['media']['file'] = $update['message']['file'];
-                $update['message']['decrypted_message']['media']['date'] = $update['message']['date'];
-                $update['message']['decrypted_message']['media']['ttl_seconds'] = $update['message']['decrypted_message']['ttl'];
-            }
             $this->API->saveUpdate($update);
             return;
         }
@@ -569,11 +568,13 @@ final class SecretChatController implements Stringable
                     }
                 }
                 $message['message']['decrypted_message'] = $message['message']['decrypted_message']['message'];
+                self::transformDecryptedUpdate($message);
                 $this->incoming[$seq = $this->in_seq_no++] = $message;
                 $this->randomIdMap[$message['message']['decrypted_message']['random_id']] = [$seq, false];
                 $this->handleDecryptedUpdate($message);
             }
         } else {
+            self::transformDecryptedUpdate($message);
             $this->handleDecryptedUpdate($message);
         }
         return true;

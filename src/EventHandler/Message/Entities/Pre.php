@@ -7,13 +7,28 @@ namespace danog\MadelineProto\EventHandler\Message\Entities;
  */
 final class Pre extends MessageEntity
 {
-    /** Programming language of the code */
-    public readonly string $language;
+    public function __construct(
+        /** Offset of message entity within message (in UTF-16 code units) */
+        public readonly int $offset,
 
-    /** @internal  */
-    protected function __construct(array $rawEntities)
+        /** Length of message entity within message (in UTF-16 code units) */
+        public readonly int $length,
+
+        /** Programming language of the code */
+        public readonly string $language
+    ) {
+    }
+
+    public function toBotAPI(): array
     {
-        parent::__construct($rawEntities);
-        $this->language = $rawEntities['language'];
+        $res = ['type' => 'pre', 'offset' => $this->offset, 'length' => $this->length];
+        if ($this->language !== '') {
+            $res['language'] = $this->language;
+        }
+        return $res;
+    }
+    public function toMTProto(): array
+    {
+        return ['_' => 'messageEntityPre', 'offset' => $this->offset, 'length' => $this->length, 'language' => $this->language];
     }
 }

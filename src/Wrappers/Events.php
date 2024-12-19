@@ -27,6 +27,7 @@ use danog\MadelineProto\Ipc\EventHandlerProxy;
 use danog\MadelineProto\PluginEventHandler;
 use danog\MadelineProto\Settings;
 use danog\MadelineProto\UpdateHandlerType;
+use ReflectionClass;
 
 /**
  * Event handler.
@@ -57,6 +58,7 @@ trait Events
      * @var array<string, callable>
      */
     private array $eventHandlerMethods = [];
+    private \Closure $rethrowHandler;
     /**
      * Event handler handler list.
      *
@@ -81,7 +83,8 @@ trait Events
         $this->event_handler = $eventHandler;
         if (!$this->event_handler_instance instanceof $this->event_handler) {
             $class_name = $this->event_handler;
-            $this->event_handler_instance = new $class_name;
+            $refl = new ReflectionClass($class_name);
+            $this->event_handler_instance = $refl->newInstanceWithoutConstructor();
         }
 
         $pluginsNew = [];
@@ -94,13 +97,16 @@ trait Events
             // Already started event handler
             return;
         }
+        $this->rethrowHandler = $this->rethrowUpdateHandler(...);
         [$this->eventHandlerMethods, $this->eventHandlerHandlers] = $methods;
         $this->pluginInstances = $pluginsNew;
 
         $this->updateHandlerType = UpdateHandlerType::EVENT_HANDLER;
-        array_map($this->handleUpdate(...), $this->updates);
-        $this->updates = [];
-        $this->updates_key = 0;
+        foreach ($this->getUpdatesQueue as $update) {
+            $this->handleUpdate($update);
+        }
+        $this->getUpdatesQueue->clear();
+        $this->getUpdatesQueueKey = 0;
         $this->startUpdateSystem();
     }
     /**
@@ -156,6 +162,13 @@ trait Events
             return $this->getPlugin($class);
         }
         return $this->event_handler_instance;
+    }
+    /** @internal */
+    public function getEventHandlerClass(): ?string
+    {
+        return $this->event_handler_instance !== null
+            ? $this->event_handler_instance::class
+            : null;
     }
     /**
      * Check if an event handler instance is present.

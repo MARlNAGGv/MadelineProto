@@ -20,24 +20,37 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto;
 
-use Amp\ByteStream\ReadableStream;
+use Amp\ByteStream\ReadableBuffer;
 use Amp\Cache\Cache;
 use Amp\Cache\LocalCache;
 use Amp\Cancellation;
 use Amp\DeferredFuture;
 use Amp\Dns\DnsResolver;
 use Amp\Future;
+use Amp\Future\UnhandledFutureError;
 use Amp\Http\Client\HttpClient;
 use Amp\Http\Client\Request;
+use Amp\Http\HttpStatus;
+use Amp\Http\Server\DefaultErrorHandler;
+use Amp\Http\Server\Request as ServerRequest;
+use Amp\Http\Server\RequestHandler;
+use Amp\Http\Server\Response as ServerResponse;
+use Amp\Http\Server\SocketHttpServer;
+use Amp\SignalException;
 use Amp\Sync\LocalKeyedMutex;
 use Amp\Sync\LocalMutex;
-use AssertionError;
+use danog\AsyncOrm\Annotations\OrmMappedArray;
+use danog\AsyncOrm\DbArray;
+use danog\AsyncOrm\DbArrayBuilder;
+use danog\AsyncOrm\Driver\MemoryArray;
+use danog\AsyncOrm\KeyType;
+use danog\AsyncOrm\Settings as OrmSettings;
+use danog\AsyncOrm\ValueType;
+use danog\BetterPrometheus\BetterCounter;
+use danog\BetterPrometheus\BetterGauge;
+use danog\BetterPrometheus\BetterHistogram;
+use danog\BetterPrometheus\BetterSummary;
 use danog\MadelineProto\Broadcast\Broadcast;
-use danog\MadelineProto\Db\DbArray;
-use danog\MadelineProto\Db\DbPropertiesFactory;
-use danog\MadelineProto\Db\DbPropertiesTrait;
-use danog\MadelineProto\Db\MemoryArray;
-use danog\MadelineProto\EventHandler\Media;
 use danog\MadelineProto\EventHandler\Message;
 use danog\MadelineProto\Ipc\Server;
 use danog\MadelineProto\Loop\Generic\PeriodicLoopInternal;
@@ -53,8 +66,8 @@ use danog\MadelineProto\MTProtoTools\PasswordCalculator;
 use danog\MadelineProto\MTProtoTools\PeerDatabase;
 use danog\MadelineProto\MTProtoTools\PeerHandler;
 use danog\MadelineProto\MTProtoTools\ReferenceDatabase;
+use danog\MadelineProto\MTProtoTools\ResponseInfo;
 use danog\MadelineProto\MTProtoTools\UpdateHandler;
-use danog\MadelineProto\MTProtoTools\UpdatesState;
 use danog\MadelineProto\Settings\Database\DriverDatabaseAbstract;
 use danog\MadelineProto\Settings\TLSchema;
 use danog\MadelineProto\TL\Conversion\BotAPI;
@@ -72,12 +85,20 @@ use danog\MadelineProto\Wrappers\Events;
 use danog\MadelineProto\Wrappers\Login;
 use danog\MadelineProto\Wrappers\Loop;
 use danog\MadelineProto\Wrappers\Start;
+use Prometheus\Counter;
+use Prometheus\Gauge;
+use Prometheus\Histogram;
+use Prometheus\RendererInterface;
+use Prometheus\RenderTextFormat;
+use Prometheus\Summary;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
+use SplQueue;
 use Throwable;
 use Webmozart\Assert\Assert;
 
 use function Amp\async;
+use function Amp\ByteStream\pipe;
 use function Amp\File\deleteFile;
 use function Amp\File\getSize;
 use function Amp\File\openFile;
@@ -111,19 +132,15 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     use Login;
     use Loop;
     use Start;
-    use DbPropertiesTrait;
+    use LegacyMigrator {
+        LegacyMigrator::initDbProperties as private internalInitDbProperties;
+        LegacyMigrator::saveDbProperties as private internalSaveDbProperties;
+    }
     use Broadcast;
     private const MAX_ENTITY_LENGTH = 100;
     private const MAX_ENTITY_SIZE = 8110;
-    /**
-     * Internal version of MadelineProto.
-     *
-     * Increased every time the default settings array or something big changes
-     *
-     * @internal
-     * @var int
-     */
-    public const V = 178;
+    /** @internal */
+    public const PFS_DURATION = 1*24*60*60;
     /**
      * Bad message error codes.
      *
@@ -223,8 +240,10 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     /**
      * Cached parameters for fetching channel participants.
      *
+     * @var DbArray<string, array>
      */
-    public DbArray $channelParticipants;
+    #[OrmMappedArray(KeyType::STRING, ValueType::SCALAR)]
+    public $channelParticipants;
     /**
      * When we last stored data in remote peer database (now doesn't exist anymore).
      *
@@ -238,18 +257,20 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     /**
      * Sponsored message database.
      *
+     * @var DbArray<int, array>
      */
-    public DbArray $sponsoredMessages;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR)]
+    public $sponsoredMessages;
     /**
      * Latest chat message ID map for update handling.
      *
      */
     private array $msg_ids = [];
     /**
-     * Version integer for upgrades.
+     * Version value for upgrades.
      *
      */
-    private int $v = 0;
+    private string|int $v = 0;
     /**
      * Cached getdialogs params.
      *
@@ -385,18 +406,8 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     /**
      * Nullcache array for storing main session file to DB.
      */
-    public DbArray $session;
-
-    /**
-     * List of properties stored in database (memory or external).
-     *
-     * @see DbPropertiesFactory
-     */
-    protected static array $dbProperties = [
-        'sponsoredMessages' => ['innerMadelineProto' => true],
-        'channelParticipants' => ['innerMadelineProto' => true],
-        'session' => ['innerMadelineProto' => true, 'enableCache' => false],
-    ];
+    #[OrmMappedArray(KeyType::STRING, ValueType::SCALAR, cacheTtl: 0, optimizeIfWastedMb: 1, tablePostfix: 'session')]
+    public DbArray $sessionDb;
 
     /**
      * Returns an instance of a client by session name.
@@ -415,12 +426,29 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      */
     public function serializeSession(object $data)
     {
+        // Force migration
+        $this->getDbAutoProperties();
         /** @psalm-suppress TypeDoesNotContainType */
-        if (!isset($this->session) || $this->session instanceof MemoryArray) {
+        if (!isset($this->sessionDb) || $this->sessionDb instanceof MemoryArray) {
             return $data;
         }
-        $this->session['data'] = $data;
-        return $this->session;
+        $this->sessionDb['data'] = $data;
+
+        $db = [];
+        $db []= async($this->referenceDatabase->saveDbProperties(...));
+        $db []= async($this->minDatabase->saveDbProperties(...));
+        $db []= async($this->peerDatabase->saveDbProperties(...));
+        $db []= async($this->internalSaveDbProperties(...));
+        if (isset($this->event_handler_instance)) {
+            $db []= async($this->event_handler_instance->internalSaveDbProperties(...));
+        }
+        await($db);
+        return new DbArrayBuilder(
+            $this->getDbPrefix().'_MTProto_session',
+            $this->getDbSettings(),
+            KeyType::STRING,
+            ValueType::SCALAR
+        );
     }
 
     /**
@@ -477,6 +505,9 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $this->wrapper = $wrapper;
             self::$references[$this->getSessionName()] = $this;
         }
+        $q = new SplQueue;
+        $q->setIteratorMode(SplQueue::IT_MODE_DELETE);
+        $this->updateQueue ??= $q;
 
         $initDeferred = new DeferredFuture;
         $this->initPromise = $initDeferred->getFuture();
@@ -494,6 +525,103 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     }
 
     /**
+     * Renders prometheus stats using the specified renderer.
+     *
+     * By default uses the text renderer.
+     */
+    public function renderPromStats(?RendererInterface $renderer = null): string
+    {
+        return ($renderer ?? new RenderTextFormat)->render(
+            GarbageCollector::$prometheus->storageAdapter->collect()
+        );
+    }
+
+    /**
+     * Creates and returns a prometheus gauge.
+     *
+     * Returns null if prometheus stats are disabled.
+     *
+     * @param array<string, string> $labels
+     */
+    public function getPromGauge(string $namespace, string $name, string $help, array $labels = []): ?BetterGauge
+    {
+        if (!$this->getSettings()->getMetrics()->getEnablePrometheusCollection()) {
+            return null;
+        }
+        return GarbageCollector::$prometheus->getOrRegisterGauge(
+            $namespace,
+            $name,
+            $help,
+            $labels + ['session' => $this->getSessionName(), 'session_id' => (string) ($this->getSelf()['id'] ?? '')],
+        );
+    }
+
+    /**
+     * Creates and returns a prometheus counter.
+     *
+     * Returns null if prometheus stats are disabled.
+     *
+     * @param array<string, string> $labels
+     */
+    public function getPromCounter(string $namespace, string $name, string $help, array $labels = []): ?BetterCounter
+    {
+        if (!$this->getSettings()->getMetrics()->getEnablePrometheusCollection()) {
+            return null;
+        }
+        return GarbageCollector::$prometheus->getOrRegisterCounter(
+            $namespace,
+            $name,
+            $help,
+            $labels + ['session' => $this->getSessionName(), 'session_id' => (string) ($this->getSelf()['id'] ?? '')],
+        );
+    }
+
+    /**
+     * Creates and returns a prometheus summary.
+     *
+     * Returns null if prometheus stats are disabled.
+     *
+     * @param array<string, string> $labels
+     * @param ?non-empty-list<float> $quantiles
+     */
+    public function getPromSummary(string $namespace, string $name, string $help, array $labels = [], int $maxAgeSeconds = 600, ?array $quantiles = null): ?BetterSummary
+    {
+        if (!$this->getSettings()->getMetrics()->getEnablePrometheusCollection()) {
+            return null;
+        }
+        return GarbageCollector::$prometheus->getOrRegisterSummary(
+            $namespace,
+            $name,
+            $help,
+            $labels + ['session' => $this->getSessionName(), 'session_id' => (string) ($this->getSelf()['id'] ?? '')],
+            $maxAgeSeconds,
+            $quantiles
+        );
+    }
+
+    /**
+     * Creates and returns a prometheus histogram.
+     *
+     * Returns null if prometheus stats are disabled.
+     *
+     * @param array<string, string> $labels
+     * @param ?non-empty-list<float> $buckets
+     */
+    public function getPromHistogram(string $namespace, string $name, string $help, array $labels = [], ?array $buckets = null): ?BetterHistogram
+    {
+        if (!$this->getSettings()->getMetrics()->getEnablePrometheusCollection()) {
+            return null;
+        }
+        return GarbageCollector::$prometheus->getOrRegisterHistogram(
+            $namespace,
+            $name,
+            $help,
+            $labels + ['session' => $this->getSessionName(), 'session_id' => (string) ($this->getSelf()['id'] ?? '')],
+            $buckets
+        );
+    }
+
+    /**
      * Initialization function.
      *
      * @internal
@@ -504,12 +632,6 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         Magic::start(light: false);
         // Parse and store settings
         $this->updateSettingsInternal($settings, false);
-        // Start IPC server
-        if (!$this->ipcServer) {
-            $this->ipcServer = new Server($this);
-            $this->ipcServer->setIpcPath($this->wrapper->getSession());
-        }
-        $this->ipcServer->start();
         // Actually instantiate needed classes like a boss
         $this->cleanupProperties();
         // Load rsa keys
@@ -536,7 +658,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         $this->datacenter->currentDatacenter = $this->settings->getConnection()->getTestMode() ? 10002 : 2;
         $this->getConfig();
         $this->startUpdateSystem(true);
-        $this->v = self::V;
+        $this->v = API::RELEASE;
 
         $this->settings->applyChanges();
     }
@@ -572,6 +694,11 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $prefix = $this->tmpDbPrefix;
         }
         return (string) $prefix;
+    }
+    /** @internal */
+    public function getDbSettings(): OrmSettings
+    {
+        return $this->settings->getDb()->getOrmSettings();
     }
 
     /**
@@ -610,8 +737,9 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             'event_handler',
             'event_handler_instance',
             'pluginInstances',
-            'updates',
-            'updates_key',
+            'updateQueue',
+            'getUpdatesQueue',
+            'getUpdatesQueueKey',
             'webhookUrl',
 
             'updateHandlerType',
@@ -636,7 +764,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
 
             // Update state
             'got_state',
-            'channels_state',
+            'updateState',
             'msg_ids',
 
             // Version
@@ -655,6 +783,10 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             'calls',
             'callsByPeer',
             'snitch',
+
+            'seqUpdater',
+            'updaters',
+            'feeders',
         ];
     }
 
@@ -670,7 +802,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (empty($file)) {
             $file = basename(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0]['file'], '.php');
         }
-        ($this->logger ?? Logger::$default)->logger($param, $level, $file);
+        ($this->logger ?? Logger::$default)?->logger($param, $level, $file);
     }
     /**
      * Get TL namespaces.
@@ -716,37 +848,6 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     }
 
     /**
-     * Provide a stream for a file, URL or amp stream.
-     */
-    public function getStream(Message|Media|LocalFile|RemoteUrl|BotApiFileId|ReadableStream $stream, ?Cancellation $cancellation = null): ReadableStream
-    {
-        if ($stream instanceof LocalFile) {
-            return openFile($stream->file, 'r');
-        }
-        if ($stream instanceof RemoteUrl) {
-            $request = new Request($stream->url);
-            $request->setTransferTimeout(INF);
-            return $this->getHTTPClient()->request(
-                $request,
-                $cancellation
-            )->getBody();
-        }
-        if ($stream instanceof Message) {
-            $stream = $stream->media;
-            if ($stream === null) {
-                throw new AssertionError("The message must be a media message!");
-            }
-        }
-        if ($stream instanceof Media) {
-            return $stream->getStream(cancellation: $cancellation);
-        }
-        if ($stream instanceof BotApiFileId) {
-            return $this->downloadToReturnedStream($stream, cancellation: $cancellation);
-        }
-        return $stream;
-    }
-
-    /**
      * Get async DNS client.
      */
     public function getDNSClient(): DnsResolver
@@ -758,9 +859,9 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      *
      * @param string $url URL
      */
-    public function fileGetContents(string $url): string
+    public function fileGetContents(string $url, ?Cancellation $cancellation = null): string
     {
-        return $this->getHTTPClient()->request(new Request($url))->getBody()->buffer();
+        return $this->getHTTPClient()->request(new Request($url), $cancellation)->getBody()->buffer($cancellation);
     }
     /**
      * Get main DC ID.
@@ -825,6 +926,8 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $this->ipcServer = null;
         }
     }
+
+    private ?SocketHttpServer $promServer = null;
     /**
      * Clean up properties from previous versions of MadelineProto.
      *
@@ -832,9 +935,98 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      */
     private function cleanupProperties(): void
     {
+        if ($this->getSettings()->getMetrics()->getEnableMemprofCollection()) {
+            if (!\extension_loaded('memprof')) {
+                throw Exception::extension('memprof');
+            }
+            if (!memprof_enabled()) {
+                throw new Exception("Memory profiling is not enabled, set the MEMPROF_PROFILE=1 environment variable or GET parameter to enable it.");
+            }
+        }
+        $info = $this->getPromGauge("MadelineProto", "version", "Info about the MadelineProto instance");
+        $info?->set(1, [
+            'php_version' => PHP_VERSION,
+            'madeline_version' => API::RELEASE,
+        ]);
+        $endpoint = $this->getSettings()->getMetrics()->getMetricsBindTo();
+        $this->promServer?->stop();
+        if ($endpoint === null) {
+            $this->promServer = null;
+        } else {
+            /** @psalm-suppress ImpureMethodCall */
+            $this->promServer = SocketHttpServer::createForDirectAccess(
+                $this->getPsrLogger()
+            );
+            $this->promServer->expose($endpoint);
+            $this->promServer->start(new class($this) implements RequestHandler {
+                public function __construct(
+                    private readonly MTProto $API
+                ) {
+                }
+                public function handleRequest(ServerRequest $request): ServerResponse
+                {
+                    if ($request->getUri()->getPath() === '/metrics') {
+                        return new ServerResponse(
+                            status: HttpStatus::OK,
+                            headers: ['Content-Type' => 'text/plain'],
+                            body: $this->API->renderPromStats(),
+                        );
+                    }
+                    if ($request->getUri()->getPath() === '/debug/pprof'
+                        && $this->API->getSettings()->getMetrics()->getEnableMemprofCollection()
+                    ) {
+                        return new ServerResponse(
+                            status: HttpStatus::OK,
+                            headers: ['Content-Type' => 'text/plain'],
+                            body: $this->API->getMemoryProfile(),
+                        );
+                    }
+                    $result = ResponseInfo::error(HttpStatus::NOT_FOUND);
+                    return new ServerResponse(
+                        $result->getCode(),
+                        $result->getHeaders(),
+                        $result->getCodeExplanation()
+                    );
+                }
+            }, new DefaultErrorHandler);
+        }
+        $this->updateCtr = $this->getPromCounter("MadelineProto", "update_count", "Number of received updates since the session was created");
+        // Start IPC server
+        if (!$this->ipcServer) {
+            $this->ipcServer = new Server($this);
+            $this->ipcServer->setIpcPath($this->wrapper->getSession());
+        }
+        $this->ipcServer->start();
+        if (!isset($this->updateQueue)) {
+            $q = new SplQueue;
+            $q->setIteratorMode(SplQueue::IT_MODE_DELETE);
+            $this->updateQueue = $q;
+        }
+
+        if (isset($this->channels_state)) {
+            $this->updateState = new CombinedUpdatesState;
+            foreach ($this->channels_state->get() as $channelId => $state) {
+                if ($channelId !== 0) {
+                    $channelId = \danog\DialogId\DialogId::fromSupergroupOrChannelId($channelId);
+                }
+                $this->updateState->get($channelId)->update(
+                    $channelId ? [
+                        'pts' => $state->pts(),
+                        'qts' => $state->qts(),
+                        'seq' => $state->seq(),
+                        'date' => $state->date(),
+                    ] : [
+                        'pts' => $state->pts(),
+                    ]
+                );
+            }
+            unset($this->channels_state, $this->feeders, $this->updaters);
+
+        }
+
         $this->acceptChatMutex ??= new LocalKeyedMutex;
         $this->confirmChatMutex ??= new LocalKeyedMutex;
-        $this->channels_state ??= new CombinedUpdatesState;
+        $this->updateState ??= new CombinedUpdatesState;
         $this->datacenter ??= new DataCenter($this);
         $this->snitch ??= new Snitch;
 
@@ -844,22 +1036,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         $this->minDatabase ??= new MinDatabase($this);
         $this->peerDatabase ??= new PeerDatabase($this);
 
-        $db = [];
-        $db []= async($this->referenceDatabase->init(...));
-        $db []= async($this->minDatabase->init(...));
-        $db []= async($this->peerDatabase->init(...));
-        $db []= async($this->initDb(...), $this);
-        foreach ($this->secretChats as $chat) {
-            $db []= async($chat->init(...));
-        }
-        await($db);
-
-        if (isset($this->chats) && $this->chats instanceof MemoryArray) {
-            $this->peerDatabase->importLegacy(
-                $this->chats,
-                $this->full_chats,
-            );
-        }
+        $this->initDb();
 
         if (!isset($this->TL)) {
             $this->TL = new TL($this);
@@ -870,21 +1047,28 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $this->TL->init($this->settings->getSchema(), $callbacks);
         }
 
-        $this->channels_state->get(FeedLoop::GENERIC);
-        foreach ($this->channels_state->get() as $state) {
-            $channelId = $state->getChannel();
-            if (!isset($this->feeders[$channelId])) {
-                $this->feeders[$channelId] = new FeedLoop($this, $channelId);
-            }
-            if (!isset($this->updaters[$channelId])) {
-                $this->updaters[$channelId] = new UpdateLoop($this, $channelId);
-            }
+        $this->updateState->get(FeedLoop::GENERIC);
+        foreach ($this->updateState->get() as $state) {
+            $channelId = $state->channelId;
+            $this->feeders[$channelId] ??= new FeedLoop($this, $channelId);
+            $this->updaters[$channelId] ??= new UpdateLoop($this, $channelId);
         }
-        if (!isset($this->seqUpdater)) {
-            $this->seqUpdater = new SeqLoop($this);
-        }
+        $this->seqUpdater ??= new SeqLoop($this);
     }
 
+    /** @internal */
+    public function initDb(): void
+    {
+        $db = [];
+        $db []= async($this->referenceDatabase->init(...));
+        $db []= async($this->minDatabase->init(...));
+        $db []= async($this->peerDatabase->init(...));
+        $db []= async($this->internalInitDbProperties(...), $this->getDbSettings(), $this->getDbPrefix().'_MTProto_');
+        foreach ($this->secretChats as $chat) {
+            $db []= async($chat->init(...));
+        }
+        await($db);
+    }
     /**
      * Upgrade MadelineProto instance.
      */
@@ -899,15 +1083,22 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         }
         $this->settings->setSchema(new TLSchema);
 
-        $this->resetMTProtoSession(true, true);
+        $this->resetMTProtoSession("upgrading madelineproto", true, true);
         $this->config = ['expires' => -1];
         $this->dh_config = ['version' => 0];
         $this->initialize($this->settings);
         foreach ($this->secretChats as $chat) {
             try {
                 $chat->notifyLayer();
-            } catch (RPCErrorException $e) {
+            } catch (RPCErrorException) {
             }
+        }
+
+        if (isset($this->updates) && \is_array($this->updates)) {
+            foreach ($this->updates as $update) {
+                $this->updateQueue->enqueue($update);
+            }
+            unset($this->updates);
         }
     }
     /**
@@ -936,11 +1127,6 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         try {
             // Setup logger
             $this->setupLogger();
-            if (!$this->ipcServer) {
-                $this->ipcServer = new Server($this);
-                $this->ipcServer->setIpcPath($this->wrapper->getSession());
-            }
-            $this->ipcServer->start();
 
             // Cleanup old properties, init new stuffs
             $this->cleanupProperties();
@@ -967,7 +1153,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
                 Lang::$currentPercentage = 0;
             }
             // Reset MTProto session (not related to user session)
-            $this->resetMTProtoSession();
+            $this->resetMTProtoSession("wakeup");
             // Update settings from constructor
             $this->updateSettings($settings);
             // Update TL callbacks
@@ -1038,11 +1224,8 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (isset($this->seqUpdater)) {
             $this->seqUpdater->stop();
         }
-        if (isset($this->channels_state)) {
-            $channelIds = [];
-            foreach ($this->channels_state->get() as $state) {
-                $channelIds[] = $state->getChannel();
-            }
+        if (isset($this->updateState)) {
+            $channelIds = array_keys($this->updateState->get());
             sort($channelIds);
             foreach ($channelIds as $channelId) {
                 if (isset($this->feeders[$channelId])) {
@@ -1127,7 +1310,8 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             if (!isset($this->settings)) {
                 $this->settings = new Settings;
             } else {
-                if ($this->v !== self::V || $this->settings->getSchema()->needsUpgrade()) {
+                if ($this->v !== API::RELEASE || $this->settings->getSchema()->needsUpgrade()) {
+                    $this->setupLogger();
                     $this->logger->logger("Generic settings have changed!", Logger::WARNING);
                     $this->upgradeMadelineProto();
                 }
@@ -1148,6 +1332,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (!$this->settings->getAppInfo()->hasApiInfo()) {
             throw new Exception(Lang::$current_lang['api_not_set'], 0, null, 'MadelineProto', 1);
         }
+        /** @var Settings $this->settings */
 
         // Setup logger
         if ($this->settings->getLogger()->hasChanged() || !isset($this->logger)) {
@@ -1158,6 +1343,11 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $this->logger->logger("The database settings have changed!", Logger::WARNING);
             $this->cleanupProperties();
             $this->settings->getDb()->applyChanges();
+        }
+        if ($this->settings->getMetrics()->hasChanged()) {
+            $this->logger->logger("The prometheus settings have changed!", Logger::WARNING);
+            $this->cleanupProperties();
+            $this->settings->getMetrics()->applyChanges();
         }
         if ($this->settings->getSerialization()->hasChanged()) {
             $this->logger->logger("The serialization settings have changed!", Logger::WARNING);
@@ -1171,9 +1361,10 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             || $this->settings->getConnection()->hasChanged()
             || $this->settings->getSchema()->hasChanged()
             || $this->settings->getSchema()->needsUpgrade()
-            || $this->v !== self::V)) {
+            || $this->v !== API::RELEASE)) {
+            $this->setupLogger();
             $this->logger->logger("Generic settings have changed!", Logger::WARNING);
-            if ($this->v !== self::V || $this->settings->getSchema()->needsUpgrade()) {
+            if ($this->v !== API::RELEASE || $this->settings->getSchema()->needsUpgrade()) {
                 $this->upgradeMadelineProto();
             }
             $this->initialize($this->settings);
@@ -1205,14 +1396,14 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      * @param boolean $auth_key Whether to reset the auth key
      * @internal
      */
-    public function resetMTProtoSession(bool $de = true, bool $auth_key = false): void
+    public function resetMTProtoSession(string $why, bool $de = true, bool $auth_key = false): void
     {
         if (!\is_object($this->datacenter)) {
             throw new Exception(Lang::$current_lang['session_corrupted']);
         }
         foreach ($this->datacenter->getDataCenterConnections() as $id => $socket) {
             if ($de) {
-                $socket->resetSession();
+                $socket->resetSession("resetMTProtoSession: $why");
             }
             if ($auth_key) {
                 $socket->setTempAuthKey(null);
@@ -1227,14 +1418,14 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (isset($this->seqUpdater)) {
             $this->seqUpdater->stop();
         }
+        $new = new CombinedUpdatesState;
         $channelIds = [];
-        $newStates = [];
-        foreach ($this->channels_state->get() as $state) {
-            $channelIds[] = $state->getChannel();
-            $channelId = $state->getChannel();
+        foreach ($this->updateState->get() as $state) {
+            $channelIds[] = $state->channelId;
+            $channelId = $state->channelId;
             $pts = $state->pts();
             $pts = $channelId ? max(1, $pts - 1000000) : ($pts > 4000000 ? $pts - 1000000 : max(1, $pts - 1000000));
-            $newStates[$channelId] = new UpdatesState(['pts' => $pts], $channelId);
+            $new->get($channelId, ['pts' => $pts]);
         }
         sort($channelIds);
         foreach ($channelIds as $channelId) {
@@ -1245,7 +1436,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
                 $this->updaters[$channelId]->stop();
             }
         }
-        $this->channels_state->__construct($newStates);
+        $this->updateState = $new;
         $this->startUpdateSystem();
     }
     /**
@@ -1261,19 +1452,11 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             return;
         }
         $this->logger('Starting update system');
-        $this->channels_state->get(FeedLoop::GENERIC);
-        $channelIds = [];
-        foreach ($this->channels_state->get() as $state) {
-            $channelIds[] = $state->getChannel();
-        }
-        sort($channelIds);
+        $this->updateState->get(FeedLoop::GENERIC);
+        $channelIds = array_keys($this->updateState->get());
         foreach ($channelIds as $channelId) {
-            if (!isset($this->feeders[$channelId])) {
-                $this->feeders[$channelId] = new FeedLoop($this, $channelId);
-            }
-            if (!isset($this->updaters[$channelId])) {
-                $this->updaters[$channelId] = new UpdateLoop($this, $channelId);
-            }
+            $this->feeders[$channelId] ??= new FeedLoop($this, $channelId);
+            $this->updaters[$channelId] ??= new UpdateLoop($this, $channelId);
             $this->feeders[$channelId]->start();
             if (isset($this->feeders[$channelId])) {
                 $this->feeders[$channelId]->resume();
@@ -1287,6 +1470,16 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         $this->seqUpdater->resume();
         foreach ($this->secretChats as $chat) {
             $chat->startFeedLoop();
+        }
+
+        if ($this->event_handler_instance instanceof EventHandler
+            && $f = $this->event_handler_instance->waitForInternalStart()
+        ) {
+            $f->map(function (): void {
+                foreach ($this->updateQueue as $update) {
+                    $this->handleUpdate($update);
+                }
+            });
         }
     }
     /**
@@ -1528,7 +1721,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             $warning .= "<h2 style='color:red;'>".htmlentities(sprintf(
                 Lang::$current_lang['update_madelineproto'],
                 API::RELEASE,
-                Magic::$latest_release ?? 'error',
+                Magic::$latest_release,
             )).'</h2>';
         }
         if (!Magic::$hasOpenssl) {
@@ -1540,10 +1733,39 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (!\extension_loaded('uv')) {
             $warning .= "<p>".htmlentities(sprintf(Lang::$current_lang['extensionRecommended'], 'uv'))."</p>";
         }
+        /*if (Magic::$hasBasedirLimitation) {
+            $warning .= "<p>".htmlentities(Lang::$current_lang['baseDirLimitation'])."</p>";
+        }*/
         if (Lang::$currentPercentage !== 100) {
             $warning .= "<p>".sprintf(Lang::$current_lang['translate_madelineproto_web'], Lang::$currentPercentage)."</p>";
         }
         return $warning;
+    }
+
+    /** @internal */
+    public function rethrowInner(\Throwable $e, bool $now = false): void
+    {
+        if ($e instanceof UnhandledFutureError) {
+            $e = $e->getPrevious();
+            \assert($e !== null);
+        }
+        if ($e instanceof SecurityException || $e instanceof SignalException) {
+            if ($now) {
+                throw $e;
+            }
+            AsyncTools::rethrow($e);
+            return;
+        }
+        if (str_starts_with($e->getMessage(), 'Could not connect to DC ')) {
+            if ($now) {
+                throw $e;
+            }
+            AsyncTools::rethrow($e);
+            return;
+        }
+        echo $e;
+        $this->wrapper->logger((string) $e, Logger::FATAL_ERROR);
+        $this->report("Surfaced: $e");
     }
 
     /**
@@ -1588,16 +1810,6 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     {
         $this->reportDest = $this->sanitizeReportPeers($userOrId);
         $this->admins = array_values(array_filter($this->reportDest, static fn (int $v) => $v > 0));
-    }
-    /**
-     * Flush all postponed messages.
-     */
-    public function flush(): void
-    {
-        $this->waitForInit();
-        foreach ($this->datacenter->getDataCenterConnections() as $conn) {
-            $conn->flush();
-        }
     }
     private ?LocalMutex $reportMutex = null;
     /**
@@ -1652,6 +1864,7 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
      */
     public function report(string $message, string $parseMode = ''): void
     {
+        $this->logger->logger("Reporting: $message", Logger::FATAL_ERROR);
         if (!$this->reportDest) {
             return;
         }
@@ -1669,24 +1882,27 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             if ($this->settings->getLogger()->getType() === Logger::FILE_LOGGER
                 && $path = $this->settings->getLogger()->getExtra()) {
                 $temp = tempnam(sys_get_temp_dir(), 'madelinelog');
-                copy($path, $temp);
+                pipe(openFile($path, 'r'), openFile($temp, 'w'));
                 $path = $temp;
-                if (!getSize($path)) {
-                    $message = "!!! WARNING !!!\nThe logfile is empty, please DO NOT delete the logfile to avoid errors in MadelineProto!\n\n$message";
-                } else {
-                    $file = $this->methodCallAsyncRead(
-                        'messages.uploadMedia',
-                        [
-                            'peer' => $this->reportDest[0],
-                            'media' => [
-                                '_' => 'inputMediaUploadedDocument',
-                                'file' => $path,
-                                'attributes' => [
-                                    ['_' => 'documentAttributeFilename', 'file_name' => 'MadelineProto.log'],
+                try {
+                    if (!getSize($path)) {
+                        $message = "!!! WARNING !!!\nThe logfile is empty, please DO NOT delete the logfile to avoid errors in MadelineProto!\n\n$message";
+                    } else {
+                        $file = $this->methodCallAsyncRead(
+                            'messages.uploadMedia',
+                            [
+                                'peer' => $this->reportDest[0],
+                                'media' => [
+                                    '_' => 'inputMediaUploadedDocument',
+                                    'file' => $path,
+                                    'attributes' => [
+                                        ['_' => 'documentAttributeFilename', 'file_name' => 'MadelineProto.log'],
+                                    ],
                                 ],
                             ],
-                        ],
-                    );
+                        );
+                    }
+                } finally {
                     deleteFile($path);
                 }
             }
@@ -1711,9 +1927,9 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         }
     }
     /**
-     * Report memory profile with memprof.
+     * Get memory profile with memprof.
      */
-    public function reportMemoryProfile(): void
+    public function getMemoryProfile(): string
     {
         if (!\extension_loaded('memprof')) {
             throw Exception::extension('memprof');
@@ -1721,14 +1937,24 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
         if (!memprof_enabled()) {
             throw new Exception("Memory profiling is not enabled, set the MEMPROF_PROFILE=1 environment variable or GET parameter to enable it.");
         }
-
-        $current = "Current memory usage: ".round(memory_get_usage()/1024/1024, 1) . " MB";
         $file = fopen('php://memory', 'r+');
         memprof_dump_pprof($file);
         fseek($file, 0);
+
+        return stream_get_contents($file);
+    }
+
+    /**
+     * Report memory profile with memprof.
+     */
+    public function reportMemoryProfile(): void
+    {
+        $pprof = $this->getMemoryProfile();
+
+        $current = "Current memory usage: ".round(memory_get_usage()/1024/1024, 1) . " MB";
         $file = [
             '_' => 'inputMediaUploadedDocument',
-            'file' => $file,
+            'file' => new ReadableBuffer($pprof),
             'attributes' => [
                 ['_' => 'documentAttributeFilename', 'file_name' => 'report.pprof'],
             ],
@@ -1769,15 +1995,25 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
     /**
      * @internal
      */
+    public function populateSupportUser(array $support): void
+    {
+        $this->supportUser = $support['user']['id'];
+    }
+    /**
+     * @internal
+     */
+    public function populateConfig(array $config): void
+    {
+        $this->config = $config;
+    }
+    /**
+     * @internal
+     */
     public function getConstructorAfterDeserializationCallbacks(): array
     {
         return [
-            'help.support' => [function (array $support): void {
-                $this->supportUser = $support['user']['id'];
-            }],
-            'config' => [function (array $config): void {
-                $this->config = $config;
-            }],
+            'help.support' => [$this->populateSupportUser(...)],
+            'config' => [$this->populateConfig(...)],
         ];
     }
     /**
@@ -1809,16 +2045,6 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             ),
             array_fill_keys(
                 [
-                    'User',
-                    'Chat',
-                    'Peer',
-                    'InputDialogPeer',
-                    'InputNotifyPeer',
-                ],
-                $this->getInfo(...),
-            ),
-            array_fill_keys(
-                [
                     'InputMedia',
                     'InputDocument',
                     'InputPhoto',
@@ -1828,9 +2054,20 @@ final class MTProto implements TLCallback, LoggerGetter, SettingsGetter
             [
                 'InputFileLocation' => $this->getDownloadInfo(...),
                 'InputPeer' => $this->getInputPeer(...),
-                'InputCheckPasswordSRP' => fn (string $password): array => (new PasswordCalculator($this->methodCallAsyncRead('account.getPassword', [], $this->authorized_dc)))->getCheckPassword($password),
+                'InputDialogPeer' => $this->getInputDialogPeer(...),
+                'InputCheckPasswordSRP' => $this->getPasswordSRP(...),
             ],
         );
+    }
+    /** @internal */
+    public function getInputDialogPeer(mixed $id): array
+    {
+        return ['_' => 'inputDialogPeer', 'peer' => $this->getInputPeer($id)];
+    }
+    /** @internal */
+    public function getPasswordSRP(string $password): array
+    {
+        return (new PasswordCalculator($this->methodCallAsyncRead('account.getPassword', [], $this->authorized_dc)))->getCheckPassword($password);
     }
     /**
      * Get debug information for var_dump.

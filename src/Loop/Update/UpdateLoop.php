@@ -20,15 +20,20 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\Loop\Update;
 
+use Amp\TimeoutException;
 use danog\Loop\Loop;
 use danog\MadelineProto\Exception;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\Loop\InternalLoop;
 use danog\MadelineProto\MTProto;
-use danog\MadelineProto\MTProtoTools\DialogId;
 use danog\MadelineProto\PeerNotInDbException;
 use danog\MadelineProto\PTSException;
-use danog\MadelineProto\RPCErrorException;
+use danog\MadelineProto\RPCError\ChannelInvalidError;
+use danog\MadelineProto\RPCError\ChannelPrivateError;
+use danog\MadelineProto\RPCError\ChatForbiddenError;
+use danog\MadelineProto\RPCError\TimeoutError;
+use danog\MadelineProto\RPCError\UserBannedInChannelError;
+use Revolt\EventLoop;
 
 use function Amp\delay;
 
@@ -53,20 +58,19 @@ final class UpdateLoop extends Loop
 
     private ?int $toPts = null;
     /**
-     * Loop name.
-     */
-    private int $channelId;
-    /**
      * Feed loop.
      */
-    private FeedLoop $feeder;
+    private ?FeedLoop $feeder = null;
     /**
      * Constructor.
      */
-    public function __construct(MTProto $API, int $channelId)
+    public function __construct(MTProto $API, private int $channelId)
     {
         $this->init($API);
-        $this->channelId = $channelId;
+    }
+    public function __sleep(): array
+    {
+        return ['channelId', 'API', 'feeder'];
     }
     /**
      * Main loop.
@@ -94,20 +98,16 @@ final class UpdateLoop extends Loop
                 }
                 $request_pts = $state->pts();
                 try {
-                    $difference = $this->API->methodCallAsyncRead('updates.getChannelDifference', ['channel' => DialogId::fromSupergroupOrChannel($this->channelId), 'filter' => ['_' => 'channelMessagesFilterEmpty'], 'pts' => $request_pts, 'limit' => $limit, 'force' => true, 'floodWaitLimit' => 86400]);
-                } catch (RPCErrorException $e) {
-                    if ($e->rpc === '-503') {
-                        delay(1.0);
-                        continue;
-                    }
-                    if (\in_array($e->rpc, ['CHANNEL_PRIVATE', 'CHAT_FORBIDDEN', 'CHANNEL_INVALID', 'USER_BANNED_IN_CHANNEL'], true)) {
-                        $this->feeder->stop();
-                        unset($this->API->updaters[$this->channelId], $this->API->feeders[$this->channelId]);
-                        $this->API->getChannelStates()->remove($this->channelId);
-                        $this->API->logger("Channel private, exiting {$this}");
-                        return self::STOP;
-                    }
-                    throw $e;
+                    $difference = $this->API->methodCallAsyncRead('updates.getChannelDifference', ['channel' => $this->channelId, 'filter' => ['_' => 'channelMessagesFilterEmpty'], 'pts' => $request_pts, 'limit' => $limit, 'force' => true, 'floodWaitLimit' => 86400]);
+                } catch (ChannelPrivateError|ChatForbiddenError|ChannelInvalidError|UserBannedInChannelError) {
+                    $this->feeder->stop();
+                    unset($this->API->updaters[$this->channelId], $this->API->feeders[$this->channelId]);
+                    $this->API->getChannelStates()->remove($this->channelId);
+                    $this->API->logger("Channel private, exiting {$this}");
+                    return self::STOP;
+                } catch (TimeoutError $e) {
+                    delay(1.0);
+                    continue;
                 } catch (PeerNotInDbException) {
                     $this->feeder->stop();
                     $this->API->getChannelStates()->remove($this->channelId);
@@ -120,6 +120,9 @@ final class UpdateLoop extends Loop
                     unset($this->API->updaters[$this->channelId], $this->API->feeders[$this->channelId]);
                     $this->API->logger("Got PTS exception, exiting update loop for $this: $e", Logger::FATAL_ERROR);
                     return self::STOP;
+                } catch (TimeoutException) {
+                    EventLoop::queue($this->API->report(...), "Network issues detected, please check logs!");
+                    continue;
                 }
                 $timeout = min(self::DEFAULT_TIMEOUT, $difference['timeout'] ?? self::DEFAULT_TIMEOUT);
                 $this->API->logger('Got '.$difference['_'], Logger::ULTRA_VERBOSE);
@@ -135,6 +138,9 @@ final class UpdateLoop extends Loop
                         }
                         $result += ($this->feeder->feed($difference['other_updates']));
                         $state->update($difference);
+                        if ($difference['new_messages']) {
+                            $result[$this->channelId] = true;
+                        }
                         $this->feeder->saveMessages($difference['new_messages']);
                         if (!$difference['final']) {
                             if ($difference['pts'] >= $toPts) {
@@ -151,6 +157,9 @@ final class UpdateLoop extends Loop
                             $difference['pts'] = $difference['dialog']['pts'];
                         }
                         $state->update($difference);
+                        if ($difference['messages']) {
+                            $result[$this->channelId] = true;
+                        }
                         $this->feeder->saveMessages($difference['messages']);
                         unset($difference);
                         break;
@@ -163,10 +172,10 @@ final class UpdateLoop extends Loop
                     try {
                         $difference = $this->API->methodCallAsyncRead('updates.getDifference', ['pts' => $state->pts(), 'date' => $state->date(), 'qts' => $state->qts()], $this->API->authorized_dc);
                         break;
-                    } catch (RPCErrorException $e) {
-                        if ($e->rpc !== '-503') {
-                            throw $e;
-                        }
+                    } catch (TimeoutError) {
+                        delay(1.0);
+                    } catch (TimeoutException) {
+                        EventLoop::queue($this->API->report(...), "Network issues detected, please check logs!");
                     }
                 } while (true);
                 $this->API->logger('Got '.$difference['_'], Logger::ULTRA_VERBOSE);
@@ -184,6 +193,9 @@ final class UpdateLoop extends Loop
                         $result += ($this->feeder->feed($difference['other_updates']));
                         $result += ($this->feeder->feed($difference['new_encrypted_messages']));
                         $state->update($difference['state']);
+                        if ($difference['new_messages']) {
+                            $result[$this->channelId] = true;
+                        }
                         $this->feeder->saveMessages($difference['new_messages']);
                         unset($difference);
                         break 2;
@@ -195,6 +207,9 @@ final class UpdateLoop extends Loop
                         $result += ($this->feeder->feed($difference['other_updates']));
                         $result += ($this->feeder->feed($difference['new_encrypted_messages']));
                         $state->update($difference['intermediate_state']);
+                        if ($difference['new_messages']) {
+                            $result[$this->channelId] = true;
+                        }
                         $this->feeder->saveMessages($difference['new_messages']);
                         if ($difference['intermediate_state']['pts'] >= $toPts) {
                             unset($difference);

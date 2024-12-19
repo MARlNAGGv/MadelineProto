@@ -59,6 +59,7 @@ use const FILTER_VALIDATE_URL;
 
 use function Amp\async;
 use function Amp\ByteStream\buffer;
+use function Amp\ByteStream\getOutputBufferStream;
 use function Amp\File\exists;
 
 use function Amp\File\getSize;
@@ -110,6 +111,7 @@ trait FilesLogic
 
             Assert::true(isset($_SERVER['REQUEST_METHOD']));
 
+            /** @psalm-suppress PossiblyUndefinedArrayOffset */
             $result = ResponseInfo::parseHeaders(
                 $_SERVER['REQUEST_METHOD'],
                 $headers,
@@ -130,7 +132,7 @@ trait FilesLogic
                 ob_implicit_flush();
             }
             [$start, $end] = $result->getServeRange();
-            $this->downloadToStream($messageMedia, fopen('php://output', 'w'), $cb, $start, $end, $cancellation);
+            $this->downloadToStream($messageMedia, getOutputBufferStream(), $cb, $start, $end, $cancellation);
         }
     }
     /**
@@ -296,11 +298,14 @@ trait FilesLogic
         if ($upload && isset($media['file']) && !\is_array($media['file'])) {
             $media['file'] = $this->upload($media['file'], cancellation: $cancellation);
         }
+        if ($upload && isset($media['thumb']) && !\is_array($media['thumb'])) {
+            $media['thumb'] = $this->upload($media['thumb'], cancellation: $cancellation);
+        }
     }
     /**
      * Upload file.
      *
-     * @param FileCallbackInterface|LocalFile|RemoteUrl|BotApiFileId|string|array|resource $file      File, URL or Telegram file to upload
+     * @param FileCallbackInterface|LocalFile|RemoteUrl|BotApiFileId|ReadableStream|string|array|resource $file      File, URL or Telegram file to upload
      * @param string                                                                       $fileName  File name
      * @param callable                                                                     $cb        Callback
      * @param boolean                                                                      $encrypted Whether to encrypt file for secret chats
@@ -315,6 +320,7 @@ trait FilesLogic
         }
         if ($file instanceof RemoteUrl) {
             $file = $file->url;
+            return $this->uploadFromUrl($file, 0, $fileName, $cb, $encrypted, $cancellation);
         }
         if ($file instanceof BotApiFileId) {
             $info = $this->getDownloadInfo($file->fileId);

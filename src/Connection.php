@@ -25,6 +25,8 @@ use Amp\ByteStream\ReadableBuffer;
 use Amp\ByteStream\ReadableStream;
 use Amp\Sync\LocalMutex;
 use AssertionError;
+use danog\DialogId\DialogId;
+use danog\Loop\GenericLoop;
 use danog\MadelineProto\Loop\Connection\CheckLoop;
 use danog\MadelineProto\Loop\Connection\CleanupLoop;
 use danog\MadelineProto\Loop\Connection\HttpWaitLoop;
@@ -33,7 +35,6 @@ use danog\MadelineProto\Loop\Connection\ReadLoop;
 use danog\MadelineProto\Loop\Connection\WriteLoop;
 use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\MTProtoSession\Session;
-use danog\MadelineProto\MTProtoTools\DialogId;
 use danog\MadelineProto\Stream\BufferedStreamInterface;
 use danog\MadelineProto\Stream\ConnectionContext;
 use danog\MadelineProto\Stream\MTProtoBufferInterface;
@@ -61,6 +62,11 @@ final class Connection
      *
      */
     protected ?WriteLoop $writer = null;
+    /**
+     * Handler loop.
+     *
+     */
+    protected ?GenericLoop $handler = null;
     /**
      * Reader loop.
      *
@@ -298,6 +304,7 @@ final class Connection
                 $this->checker ??= new CheckLoop($this);
                 $this->cleanup ??= new CleanupLoop($this);
                 $this->waiter ??= new HttpWaitLoop($this);
+                $this->handler ??= new GenericLoop(fn () => $this->handleMessages($this->new_incoming), "Handler loop");
                 if (!isset($this->pinger) && !$ctx->isMedia() && !$ctx->isCDN() && !$this->isHttp()) {
                     $this->pinger = new PingLoop($this);
                 }
@@ -313,10 +320,11 @@ final class Connection
                 Assert::true($this->reader->start(), "Could not start reader stream");
                 Assert::true($this->checker->start(), "Could not start checker stream");
                 Assert::true($this->cleanup->start(), "Could not start cleanup stream");
-                Assert::true($this->waiter->start(), "Could not start waiter stream");
+                $this->waiter->start();
                 if ($this->pinger) {
                     Assert::true($this->pinger->start(), "Could not start pinger stream");
                 }
+                $this->handler->start();
 
                 EventLoop::queue($this->shared->initAuthorization(...));
                 return $this;
@@ -325,6 +333,11 @@ final class Connection
         } finally {
             EventLoop::queue($lock->release(...));
         }
+    }
+    public function wakeupHandler(): void
+    {
+        \assert($this->handler !== null);
+        Assert::true($this->handler->resume() || $this->handler->isRunning(), "Could not resume handler!");
     }
     /**
      * Apply method abstractions.
@@ -475,7 +488,7 @@ final class Connection
             if ($res['type'] !== 'chat') {
                 throw new Exception('chat_id is not a chat id (only normal groups allowed, not supergroups)!');
             }
-            $arguments['chat_id'] = $res['chat_id'];
+            $arguments['chat_id'] = -$res['chat_id'];
         } elseif ($method === 'photos.updateProfilePhoto') {
             if (isset($arguments['id'])) {
                 if (!\is_array($arguments['id'])) {
@@ -534,33 +547,47 @@ final class Connection
     }
     /**
      * Send an MTProto message.
-     *
-     * @param boolean $flush Whether to flush the message right away
      */
-    public function sendMessage(MTProtoOutgoingMessage $message, bool $flush = true): void
+    public function sendMessage(MTProtoOutgoingMessage $message): void
     {
         $message->trySend();
         $promise = $message->getSendPromise();
         if (!$message->hasSerializedBody() || $message->shouldRefreshReferences()) {
             $body = $message->getBody();
             if ($message->shouldRefreshReferences()) {
-                $this->API->referenceDatabase->refreshNext(true);
+                $this->API->referenceDatabase->refreshNextEnable();
             }
-            if ($message->isMethod) {
-                $body = $this->API->getTL()->serializeMethod($message->getConstructor(), $body);
-            } else {
-                $body['_'] = $message->getConstructor();
-                $body = $this->API->getTL()->serializeObject(['type' => ''], $body, $message->getConstructor());
-            }
-            if ($message->shouldRefreshReferences()) {
-                $this->API->referenceDatabase->refreshNext(false);
+            try {
+                if ($message->isMethod) {
+                    $body = $this->API->getTL()->serializeMethod($message->constructor, $body);
+                    if ($message->takeoutId !== null) {
+                        $body = $this->API->getTL()->serializeMethod(
+                            'invokeWithTakeout',
+                            ['takeout_id' => $message->takeoutId, 'query' => $body],
+                        );
+                    } elseif ($message->businessConnectionId !== null) {
+                        $body = $this->API->getTL()->serializeMethod(
+                            'invokeWithBusinessConnection',
+                            ['connection_id' => $message->businessConnectionId, 'query' => $body],
+                        );
+                    }
+                } else {
+                    $body['_'] = $message->constructor;
+                    $body = $this->API->getTL()->serializeObject(['type' => ''], $body, $message->constructor);
+                }
+            } finally {
+                if ($message->shouldRefreshReferences()) {
+                    $this->API->referenceDatabase->refreshNextDisable();
+                }
             }
             $message->setSerializedBody($body);
             unset($body);
         }
         $this->pendingOutgoing[$this->pendingOutgoingKey++] = $message;
-        if ($flush) {
-            $this->flush();
+        $this->outgoingCtr?->inc();
+        $this->pendingOutgoingGauge?->set(\count($this->pendingOutgoing));
+        if (isset($this->writer)) {
+            $this->writer->resume();
         }
         $this->connect();
         $promise->await();

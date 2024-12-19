@@ -20,7 +20,7 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\Wrappers;
 
-use danog\MadelineProto\Db\DbArray;
+use danog\AsyncOrm\DbArray;
 
 /**
  * Manages ads.
@@ -46,7 +46,7 @@ trait Ads
         if ($cache && $cache[0] > time()) {
             return $cache[1];
         }
-        $result = $this->methodCallAsyncRead('channels.getSponsoredMessages', ['channel' => $peer]);
+        $result = $this->methodCallAsyncRead('messages.getSponsoredMessages', ['peer' => $peer]);
         if (\array_key_exists('messages', $result)) {
             $result = $result['messages'];
         } else {
@@ -67,6 +67,6 @@ trait Ads
         if (\is_array($message)) {
             $message = $message['random_id'];
         }
-        return $this->methodCallAsyncRead('channels.viewSponsoredMessage', ['channel' => $peer, 'random_id' => $message]);
+        return $this->methodCallAsyncRead('messages.viewSponsoredMessage', ['peer' => $peer, 'random_id' => $message]);
     }
 }

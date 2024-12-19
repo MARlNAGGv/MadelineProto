@@ -24,6 +24,12 @@ use Amp\Cancellation;
 use danog\MadelineProto\Broadcast\Action;
 use danog\MadelineProto\MTProto;
 use danog\MadelineProto\PeerNotInDbException;
+use danog\MadelineProto\RPCError\ChannelPrivateError;
+use danog\MadelineProto\RPCError\ChatWriteForbiddenError;
+use danog\MadelineProto\RPCError\InputUserDeactivatedError;
+use danog\MadelineProto\RPCError\PeerIdInvalidError;
+use danog\MadelineProto\RPCError\UserIsBlockedError;
+use danog\MadelineProto\RPCError\UserIsBotError;
 use danog\MadelineProto\RPCErrorException;
 
 /** @internal */
@@ -40,8 +46,13 @@ final class ActionSend implements Action
                     return;
                 }
                 $id = $this->API->extractMessageId($this->API->methodCallAsyncRead(
-                    isset($message['media']['_']) &&
-                        $message['media']['_'] !== 'messageMediaWebPage'
+                    isset($message['media']) && (
+                        \is_string($message['media'])
+                        || (
+                            isset($message['media']['_']) &&
+                            $message['media']['_'] !== 'messageMediaWebPage'
+                        )
+                    )
                         ? 'messages.sendMedia'
                         : 'messages.sendMessage',
                     array_merge($message, ['peer' => $peer, 'floodWaitLimit' => 2*86400, 'cancellation' => $cancellation]),
@@ -56,27 +67,7 @@ final class ActionSend implements Action
                 } catch (RPCErrorException) {
                 }
             }
-        } catch (RPCErrorException $e) {
-            if ($e->rpc === 'INPUT_USER_DEACTIVATED') {
-                return;
-            }
-            if ($e->rpc === 'USER_IS_BOT') {
-                return;
-            }
-            if ($e->rpc === 'CHAT_WRITE_FORBIDDEN') {
-                return;
-            }
-            if ($e->rpc === 'CHANNEL_PRIVATE') {
-                return;
-            }
-            if ($e->rpc === 'USER_IS_BLOCKED') {
-                return;
-            }
-            if ($e->rpc === 'PEER_ID_INVALID') {
-                return;
-            }
-            throw $e;
-        } catch (PeerNotInDbException) {
+        } catch (PeerNotInDbException|InputUserDeactivatedError|UserIsBotError|ChatWriteForbiddenError|ChannelPrivateError|UserIsBlockedError|PeerIdInvalidError) {
             return;
         }
     }

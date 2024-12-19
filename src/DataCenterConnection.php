@@ -28,6 +28,7 @@ use danog\MadelineProto\MTProto\MTProtoOutgoingMessage;
 use danog\MadelineProto\MTProto\PermAuthKey;
 use danog\MadelineProto\MTProto\TempAuthKey;
 use danog\MadelineProto\MTProtoTools\Crypt;
+use danog\MadelineProto\RPCError\DcIdInvalidError;
 use danog\MadelineProto\Settings\Connection as ConnectionSettings;
 use danog\MadelineProto\Stream\ContextIterator;
 use JsonSerializable;
@@ -193,7 +194,9 @@ final class DataCenterConnection implements JsonSerializable
                         $this->setTempAuthKey($connection->createAuthKey(true));
                     }
                 }
-                $this->flush();
+                foreach ($this->connections as $socket) {
+                    $socket->flush();
+                }
             } elseif (!$cdn) {
                 $this->syncAuthorization();
             }
@@ -214,7 +217,7 @@ final class DataCenterConnection implements JsonSerializable
     {
         $connection = $this->getAuthConnection();
         $logger = $this->API->logger;
-        $expires_in = $this->API->settings->getAuth()->getDefaultTempAuthKeyExpiresIn();
+        $expires_in = MTProto::PFS_DURATION;
         for ($retry_id_total = 1; $retry_id_total <= $this->API->settings->getAuth()->getMaxAuthTries(); $retry_id_total++) {
             try {
                 $logger->logger('Binding authorization keys...', Logger::VERBOSE);
@@ -273,13 +276,11 @@ final class DataCenterConnection implements JsonSerializable
                         $socket->methodCallAsyncRead('auth.importAuthorization', $exported_authorization);
                         $this->authorized(true);
                         break;
-                    } catch (Exception $e) {
+                    } catch (DcIdInvalidError $e) {
                         $logger->logger('Failure while syncing authorization from DC '.$authorized_dc_id.' to DC '.$this->datacenter.': '.$e->getMessage(), Logger::ERROR);
-                    } catch (RPCErrorException $e) {
+                        break;
+                    } catch (RPCErrorException|Exception $e) {
                         $logger->logger('Failure while syncing authorization from DC '.$authorized_dc_id.' to DC '.$this->datacenter.': '.$e->getMessage(), Logger::ERROR);
-                        if ($e->rpc === 'DC_ID_INVALID') {
-                            break;
-                        }
                     }
                     // Turns out this DC isn't authorized after all
                 }
@@ -392,10 +393,10 @@ final class DataCenterConnection implements JsonSerializable
     /**
      * Reset MTProto sessions.
      */
-    public function resetSession(): void
+    public function resetSession(string $why): void
     {
         foreach ($this->connections as $socket) {
-            $socket->resetSession();
+            $socket->resetSession($why);
         }
     }
     /**
@@ -405,19 +406,6 @@ final class DataCenterConnection implements JsonSerializable
     {
         foreach ($this->connections as $socket) {
             $socket->createSession();
-        }
-    }
-    /**
-     * Flush all pending packets.
-     */
-    public function flush(): void
-    {
-        if (!isset($this->datacenter)) {
-            return;
-        }
-        $this->API->logger("Flushing pending messages, DC {$this->datacenter}", Logger::NOTICE);
-        foreach ($this->connections as $socket) {
-            $socket->flush();
         }
     }
     /**
@@ -493,13 +481,13 @@ final class DataCenterConnection implements JsonSerializable
         $backup = $this->connections[$id]->backupSession();
         $list = '';
         foreach ($backup as $k => $message) {
-            if ($message->getConstructor() === 'msgs_state_req'
-                || $message->getConstructor() === 'ping_delay_disconnect'
+            if ($message->constructor === 'msgs_state_req'
+                || $message->constructor === 'ping_delay_disconnect'
                 || $message->unencrypted) {
                 unset($backup[$k]);
                 continue;
             }
-            $list .= $message->getConstructor();
+            $list .= $message->constructor;
             $list .= ', ';
         }
         $this->API->logger("Backed up {$list} from DC {$this->datacenter}.{$id}");

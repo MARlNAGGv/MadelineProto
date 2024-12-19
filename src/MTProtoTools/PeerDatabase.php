@@ -23,16 +23,19 @@ namespace danog\MadelineProto\MTProtoTools;
 use Amp\Sync\LocalKeyedMutex;
 use Amp\Sync\LocalMutex;
 use AssertionError;
-use danog\MadelineProto\Db\DbArray;
-use danog\MadelineProto\Db\DbPropertiesTrait;
-use danog\MadelineProto\Db\MemoryArray;
+use danog\AsyncOrm\Annotations\OrmMappedArray;
+use danog\AsyncOrm\DbArray;
+use danog\AsyncOrm\DbArrayBuilder;
+use danog\AsyncOrm\KeyType;
+use danog\AsyncOrm\ValueType;
+use danog\MadelineProto\EventHandler\Media\Photo;
 use danog\MadelineProto\Exception;
+use danog\MadelineProto\LegacyMigrator;
 use danog\MadelineProto\Logger;
 use danog\MadelineProto\MTProto;
 use danog\MadelineProto\PeerNotInDbException;
-use danog\MadelineProto\RPCError\FloodWaitError;
+use danog\MadelineProto\RPCError\UsernameNotOccupiedError;
 use danog\MadelineProto\RPCErrorException;
-use danog\MadelineProto\Settings\Database\SerializerType;
 use danog\MadelineProto\TL\TLCallback;
 use danog\MadelineProto\Tools;
 use InvalidArgumentException;
@@ -46,29 +49,27 @@ use Webmozart\Assert\Assert;
  */
 final class PeerDatabase implements TLCallback
 {
-    use DbPropertiesTrait;
+    use LegacyMigrator;
 
-    protected function getDbPrefix(): string
-    {
-        return $this->API->getDbPrefix();
-    }
-
-    private const V = 0;
+    private const V = 1;
 
     /**
      * Chats.
      *
      * @var DbArray<int, array>
      */
-    private DbArray $db;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR, tablePostfix: '_MTProto_chats')]
+    private $db;
     /**
      * @var DbArray<int, array>
      */
-    private DbArray $fullDb;
+    #[OrmMappedArray(KeyType::INT, ValueType::SCALAR, tablePostfix: '_MTProto_full_chats')]
+    private $fullDb;
     /**
      * @var DbArray<string, int>
      */
-    private DbArray $usernames;
+    #[OrmMappedArray(KeyType::STRING, ValueType::INT, tablePostfix: '_PeerDatabase_usernames')]
+    private $usernames;
     private bool $hasInfo = true;
     private bool $hasUsernames = true;
 
@@ -76,27 +77,6 @@ final class PeerDatabase implements TLCallback
     private array $pendingDb = [];
 
     private int $v = self::V;
-
-    /**
-     * List of properties stored in database (memory or external).
-     *
-     * @see DbPropertiesFactory
-     */
-    protected static array $dbProperties = [
-        'db' => [
-            'innerMadelineProto' => true,
-            'table' => 'MTProto_chats',
-        ],
-        'fullDb' => [
-            'innerMadelineProto' => true,
-            'table' => 'MTProto_full_chats',
-        ],
-        'usernames' => [
-            'innerMadelineProto' => true,
-            'innerMadelineProtoSerializer' => SerializerType::STRING,
-            'table' => 'MTProto_usernames',
-        ],
-    ];
 
     private LocalMutex $decacheMutex;
     private LocalKeyedMutex $mutex;
@@ -116,7 +96,7 @@ final class PeerDatabase implements TLCallback
     }
     public function init(): void
     {
-        $this->initDb($this->API);
+        $this->initDbProperties($this->API->getDbSettings(), $this->API->getDbPrefix());
         if (!$this->API->settings->getDb()->getEnableFullPeerDb()) {
             $this->fullDb->clear();
         }
@@ -143,6 +123,25 @@ final class PeerDatabase implements TLCallback
 
         if (!$this->API->settings->getDb()->getEnableUsernameDb()) {
             $this->usernames->clear();
+        } elseif ($this->v === 0) {
+            $old = new DbArrayBuilder(
+                $this->API->getDbPrefix().'_MTProto_usernames',
+                $this->API->getDbSettings(),
+                KeyType::STRING,
+                ValueType::SCALAR
+            );
+            $old = $old->build();
+            $kk = 0;
+            $total = \count($old);
+            foreach ($old as $k => $v) {
+                $kk++;
+                if ($kk % 500 === 0 || $kk === $total) {
+                    $this->API->logger("Migrating username database ($kk/$total)...");
+                }
+                $this->usernames[$k] = $v;
+            }
+            $old->clear();
+            $this->v = self::V;
         }
 
         EventLoop::queue(function (): void {
@@ -152,27 +151,14 @@ final class PeerDatabase implements TLCallback
             }
         });
     }
-    public function importLegacy(MemoryArray $chats, MemoryArray $fullChats): void
-    {
-        foreach ($chats as $id => $chat) {
-            $this->db[$id] = $chat;
-            if ($this->API->settings->getDb()->getEnableUsernameDb()) {
-                foreach (self::getUsernames($chat) as $username) {
-                    $this->usernames[$username] = (int) $id;
-                }
-            }
-        }
-        if (!$this->API->settings->getDb()->getEnableFullPeerDb()) {
-            return;
-        }
-        foreach ($fullChats as $id => $chat) {
-            $this->fullDb[$id] = $chat;
-        }
-    }
 
     public function getFull(int $id): ?array
     {
-        return $this->fullDb[$id];
+        $result = $this->fullDb[$id];
+        if ($result !== null) {
+            $result['id'] = $id;
+        }
+        return $result;
     }
     public function expireFull(int $id): void
     {
@@ -187,7 +173,11 @@ final class PeerDatabase implements TLCallback
                 $this->processUser($id);
             }
         }
-        return $this->db[$id];
+        $result = $this->db[$id];
+        if ($result !== null) {
+            $result['id'] = $id;
+        }
+        return $result;
     }
     public function isset(int $id): bool
     {
@@ -200,6 +190,7 @@ final class PeerDatabase implements TLCallback
         } else {
             $this->processUser($id);
         }
+        $this->recacheChatUsername($id, $this->db[$id] ?? null, []);
         unset($this->db[$id]);
     }
 
@@ -208,18 +199,6 @@ final class PeerDatabase implements TLCallback
      */
     public function getDialogIds(): array
     {
-        $res = [];
-        foreach ($this->getDialogs() as $id => $_) {
-            $res []= (int) $id;
-        }
-        return $res;
-    }
-
-    /**
-     * @return iterable<int, array>
-     */
-    public function getDialogs(): iterable
-    {
         foreach ($this->pendingDb as $key => $_) {
             if ($key < 0) {
                 $this->processChat($key);
@@ -227,7 +206,11 @@ final class PeerDatabase implements TLCallback
                 $this->processUser($key);
             }
         }
-        return $this->db->getIterator();
+        $res = [];
+        foreach ($this->db->getIterator() as $id => $_) {
+            $res []= (int) $id;
+        }
+        return $res;
     }
 
     /**
@@ -250,15 +233,17 @@ final class PeerDatabase implements TLCallback
                     $id = $content;
                 }
             }
-            $id = strtolower(str_replace('@', '', $id));
-            if ($id === 'me') {
-                $id = $this->API->authorization['user']['id'];
-            } elseif ($id === 'support') {
-                $id = $this->API->methodCallAsyncRead('help.getSupport', [])['user'];
-            } else {
-                $id = $this->resolveUsername($id);
-                if ($id === null) {
-                    throw new PeerNotInDbException;
+            if (\is_string($id)) {
+                $id = strtolower(str_replace('@', '', $id));
+                if ($id === 'me') {
+                    $id = $this->API->authorization['user']['id'];
+                } elseif ($id === 'support') {
+                    $id = $this->API->methodCallAsyncRead('help.getSupport', [])['user'];
+                } else {
+                    $id = $this->resolveUsername($id);
+                    if ($id === null) {
+                        throw new PeerNotInDbException;
+                    }
                 }
             }
         }
@@ -272,7 +257,7 @@ final class PeerDatabase implements TLCallback
      */
     public function fullChatLastUpdated(mixed $id): int
     {
-        return $this->getFull($id)['last_update'] ?? 0;
+        return $this->getFull($id)['inserted'] ?? 0;
     }
 
     private function recacheChatUsername(int $id, ?array $old, array $new): void
@@ -280,7 +265,7 @@ final class PeerDatabase implements TLCallback
         if (!$this->API->settings->getDb()->getEnableUsernameDb()) {
             return;
         }
-        $new = self::getUsernames($new);
+        $new = $new ? self::getUsernames($new) : [];
         $old = $old ? self::getUsernames($old) : [];
         $diffToRemove = array_diff($old, $new);
         $diffToAdd = array_diff($new, $old);
@@ -329,7 +314,13 @@ final class PeerDatabase implements TLCallback
             }
         }
         $result = $this->usernames[$username];
-        return $result === null ? $result : (int) $result;
+        $id = $result === null ? $result : (int) $result;
+        if ($id !== null && !$this->isset($id)) {
+            $this->API->logger("No peer entry for cached username @$username => {$id}, dropping entry!");
+            unset($this->usernames[$username]);
+            return null;
+        }
+        return $id;
     }
 
     private array $caching_simple_username = [];
@@ -352,13 +343,7 @@ final class PeerDatabase implements TLCallback
             $result = $this->API->getIdInternal(
                 ($this->API->methodCallAsyncRead('contacts.resolveUsername', ['username' => $username]))['peer'],
             );
-        } catch (FloodWaitError $e) {
-            throw $e;
-        } catch (RPCErrorException $e) {
-            $this->API->logger('Username resolution failed with error '.$e->getMessage(), Logger::ERROR);
-            if ($e->rpc === 'AUTH_KEY_UNREGISTERED' || $e->rpc === 'USERNAME_INVALID') {
-                throw $e;
-            }
+        } catch (UsernameNotOccupiedError) {
         } finally {
             unset($this->caching_simple_username[$username]);
         }
@@ -389,7 +374,7 @@ final class PeerDatabase implements TLCallback
         if ($user['id'] === ($this->API->authorization['user']['id'] ?? null)) {
             $this->API->authorization['user'] = $user;
         }
-        if (($this->pendingDb[$user['id']] ?? null) === $user['id']) {
+        if (($this->pendingDb[$user['id']] ?? null) == $user) {
             return;
         }
         $this->pendingDb[$user['id']] = $user;
@@ -432,7 +417,7 @@ final class PeerDatabase implements TLCallback
                     return;
                 }
             }
-            if ($existingChat !== $user) {
+            if ($existingChat != $user) {
                 $this->API->logger("Updated user {$user['id']}", Logger::ULTRA_VERBOSE);
                 if (($user['min'] ?? false) && !($existingChat['min'] ?? false)) {
                     $this->API->logger("{$user['id']} is min, filling missing fields", Logger::ULTRA_VERBOSE);
@@ -441,7 +426,7 @@ final class PeerDatabase implements TLCallback
                         $user['access_hash'] = $existingChat['access_hash'];
                     }
                 }
-                $this->recacheChatUsername($user['id'], $existingChat, $user);
+                $userUnchanged = $user;
                 if (!$this->API->settings->getDb()->getEnablePeerInfoDb()) {
                     $user = [
                         '_' => $user['_'],
@@ -451,8 +436,12 @@ final class PeerDatabase implements TLCallback
                     ];
                 }
                 $this->db[$user['id']] = $user;
+                $this->recacheChatUsername($user['id'], $existingChat, $userUnchanged);
                 if ($existingChat && ($existingChat['min'] ?? false) && !($user['min'] ?? false)) {
                     $this->API->minDatabase->clearPeer($user['id']);
+                }
+                if ($existingChat && ($existingChat['bot_info_version'] ?? null) !== ($user['bot_info_version'] ?? null)) {
+                    $this->expireFull($user['id']);
                 }
             }
         } finally {
@@ -469,7 +458,7 @@ final class PeerDatabase implements TLCallback
         } else {
             $this->pendingDb[$chat] = [
                 '_' => 'channel',
-                'id' => DialogId::toSupergroupOrChannel($chat),
+                'id' => $chat,
             ];
             $this->processChat($chat);
         }
@@ -495,7 +484,7 @@ final class PeerDatabase implements TLCallback
     private function addChat(array $chat): void
     {
         $id = $this->API->getIdInternal($chat);
-        if (($this->pendingDb[$id] ?? null) === $chat) {
+        if (($this->pendingDb[$id] ?? null) == $chat) {
             return;
         }
         $this->pendingDb[$id] = $chat;
@@ -516,9 +505,9 @@ final class PeerDatabase implements TLCallback
                 || $chat['_'] === 'chatEmpty'
                 || $chat['_'] === 'chatForbidden'
             ) {
-                $existingChat = $this->db[-$chat['id']];
-                if (!$existingChat || $existingChat !== $chat) {
-                    $this->API->logger("Updated chat -{$chat['id']}", Logger::ULTRA_VERBOSE);
+                $existingChat = $this->db[$chat['id']];
+                if (!$existingChat || $existingChat != $chat) {
+                    $this->API->logger("Updated chat {$chat['id']}", Logger::ULTRA_VERBOSE);
                     if (!$this->API->settings->getDb()->getEnablePeerInfoDb()) {
                         $chat = [
                             '_' => $chat['_'],
@@ -527,7 +516,7 @@ final class PeerDatabase implements TLCallback
                             'min' => $chat['min'] ?? false,
                         ];
                     }
-                    $this->db[-$chat['id']] = $chat;
+                    $this->db[$chat['id']] = $chat;
                 }
                 return;
             }
@@ -537,7 +526,7 @@ final class PeerDatabase implements TLCallback
             if ($chat['_'] !== 'channel' && $chat['_'] !== 'channelForbidden') {
                 throw new InvalidArgumentException('Invalid chat type '.$chat['_']);
             }
-            $bot_api_id = DialogId::fromSupergroupOrChannel($chat['id']);
+            $bot_api_id = $chat['id'];
             $existingChat = $this->db[$bot_api_id];
             if (!isset($chat['access_hash']) && !($chat['min'] ?? false)) {
                 if (isset($existingChat['access_hash'])) {
@@ -563,8 +552,7 @@ final class PeerDatabase implements TLCallback
                     return;
                 }
             }
-            if ($existingChat !== $chat) {
-                $this->recacheChatUsername($bot_api_id, $existingChat, $chat);
+            if ($existingChat != $chat) {
                 $this->API->logger("Updated chat {$bot_api_id}", Logger::ULTRA_VERBOSE);
                 if (($chat['min'] ?? false) && $existingChat && !($existingChat['min'] ?? false)) {
                     $this->API->logger("{$bot_api_id} is min, filling missing fields", Logger::ULTRA_VERBOSE);
@@ -576,6 +564,7 @@ final class PeerDatabase implements TLCallback
                     }
                     $chat = $newchat;
                 }
+                $chatUnchanged = $chat;
                 if (!$this->API->settings->getDb()->getEnablePeerInfoDb()) {
                     $chat = [
                         '_' => $chat['_'],
@@ -585,6 +574,7 @@ final class PeerDatabase implements TLCallback
                     ];
                 }
                 $this->db[$bot_api_id] = $chat;
+                $this->recacheChatUsername($bot_api_id, $existingChat, $chatUnchanged);
                 if ($existingChat && ($existingChat['min'] ?? false) && !($chat['min'] ?? false)) {
                     $this->API->minDatabase->clearPeer($bot_api_id);
                 }
@@ -601,9 +591,18 @@ final class PeerDatabase implements TLCallback
      */
     private function addFullChat(array $full): void
     {
+        foreach (['chat_photo', 'personal_photo', 'fallback_photo', 'profile_photo'] as $k) {
+            if (isset($full[$k])) {
+                if ($full[$k]['_'] === 'photoEmpty') {
+                    unset($full[$k]);
+                } else {
+                    $full[$k] = new Photo($this->API, $full[$k], false);
+                }
+            }
+        }
         $this->fullDb[$this->API->getIdInternal($full)] = [
             'full' => $full,
-            'last_update' => time(),
+            'inserted' => time(),
         ];
     }
 

@@ -21,13 +21,13 @@ use danog\MadelineProto\MTProto;
 /** Represents a query sent by the user by clicking on a button. */
 abstract class CallbackQuery extends Update
 {
-    /** @var int Query ID */
+    /** Query ID */
     public readonly int $queryId;
-    /** @var int ID of the user that pressed the button */
+
+    /** ID of the user that pressed the button */
     public readonly int $userId;
-    /**
-     * @var int Global identifier, uniquely corresponding to the chat to which the message with the callback button was sent. Useful for high scores in games.
-     */
+
+    /** Global identifier, uniquely corresponding to the chat to which the message with the callback button was sent. Useful for high scores in games. */
     public readonly int $chatInstance;
 
     /** @internal */
@@ -40,13 +40,13 @@ abstract class CallbackQuery extends Update
     }
 
     /**
-     * @param string      $message   Popup to show
+     * @param ?string     $message   Popup to show
      * @param bool        $alert     Whether to show the message as a popup instead of a toast notification
      * @param string|null $url       URL to open
      * @param int         $cacheTime Cache validity (default set to 5 min based on telegram official docs ...)
      */
     public function answer(
-        string  $message,
+        ?string  $message = null,
         bool    $alert = false,
         ?string $url = null,
         int     $cacheTime = 5 * 60

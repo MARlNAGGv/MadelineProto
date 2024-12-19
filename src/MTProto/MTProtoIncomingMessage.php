@@ -75,13 +75,23 @@ final class MTProtoIncomingMessage extends MTProtoMessage
         $this->content = $content;
         $this->msgId = $msgId;
 
-        $this->received = time();
+        $this->received = hrtime(true);
 
         parent::__construct(!isset(MTProtoMessage::NOT_CONTENT_RELATED[$content['_']]));
         if (!$this->contentRelated) {
             $this->state |= 16; // message not requiring acknowledgment
         }
     }
+
+    /**
+     * Get my message ID.
+     */
+    public function getMsgId(): int
+    {
+        \assert($this->msgId !== null);
+        return $this->msgId;
+    }
+
     /**
      * Get deserialized response content.
      */

@@ -34,6 +34,7 @@ final class Lang
     public static array $lang = %s;
 
     // THIS WILL BE OVERWRITTEN BY $lang["en"]
+    /** @var array<string, string> */
     public static array $current_lang = %s;
 }';
 
@@ -42,15 +43,18 @@ $base = json_decode(file_get_contents("langs/en.json"), true);
 $langs = [];
 $percentages = [];
 
-$res = json_decode(file_get_contents("https://weblate.madelineproto.xyz/api/projects/madelineproto/languages/"), true);
-foreach ($res as ['code' => $code, 'translated_percent' => $percent]) {
-    $percentages[$code] = (int) $percent;
-}
+$res = file_get_contents("https://weblate.madelineproto.xyz/api/projects/madelineproto/languages/");
+if ($res !== false) {
+    $res = json_decode($res, true);
+    foreach ($res as ['code' => $code, 'translated_percent' => $percent]) {
+        $percentages[$code] = (int) $percent;
+    }
 
-foreach (glob("langs/*.json") as $lang) {
-    $code = basename($lang, '.json');
-    $langs[$code] = array_merge($base, json_decode(file_get_contents($lang), true));
-    ksort($langs[$code]);
-}
+    foreach (glob("langs/*.json") as $lang) {
+        $code = basename($lang, '.json');
+        $langs[$code] = array_merge($base, json_decode(file_get_contents($lang), true));
+        ksort($langs[$code]);
+    }
 
-file_put_contents('src/Lang.php', sprintf($template, var_export($percentages, true), var_export($langs, true), var_export($langs['en'], true)));
+    file_put_contents('src/Lang.php', sprintf($template, var_export($percentages, true), var_export($langs, true), var_export($langs['en'], true)));
+}

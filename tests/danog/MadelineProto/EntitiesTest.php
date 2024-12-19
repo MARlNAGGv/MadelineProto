@@ -4,10 +4,28 @@ declare(strict_types=1);
 
 namespace danog\MadelineProto\Test;
 
-use danog\MadelineProto\MTProto;
+use danog\MadelineProto\EventHandler\Message\Entities\BankCard;
+use danog\MadelineProto\EventHandler\Message\Entities\Blockquote;
+use danog\MadelineProto\EventHandler\Message\Entities\Bold;
+use danog\MadelineProto\EventHandler\Message\Entities\BotCommand;
+use danog\MadelineProto\EventHandler\Message\Entities\Cashtag;
+use danog\MadelineProto\EventHandler\Message\Entities\Code;
+use danog\MadelineProto\EventHandler\Message\Entities\CustomEmoji;
+use danog\MadelineProto\EventHandler\Message\Entities\Email;
+use danog\MadelineProto\EventHandler\Message\Entities\Hashtag;
+use danog\MadelineProto\EventHandler\Message\Entities\Italic;
+use danog\MadelineProto\EventHandler\Message\Entities\Mention;
+use danog\MadelineProto\EventHandler\Message\Entities\MentionName;
+use danog\MadelineProto\EventHandler\Message\Entities\MessageEntity;
+use danog\MadelineProto\EventHandler\Message\Entities\Phone;
+use danog\MadelineProto\EventHandler\Message\Entities\Pre;
+use danog\MadelineProto\EventHandler\Message\Entities\Spoiler;
+use danog\MadelineProto\EventHandler\Message\Entities\Strike;
+use danog\MadelineProto\EventHandler\Message\Entities\TextUrl;
+use danog\MadelineProto\EventHandler\Message\Entities\Underline;
+use danog\MadelineProto\EventHandler\Message\Entities\Url;
 use danog\MadelineProto\StrTools;
-use danog\MadelineProto\TL\Conversion\DOMEntities;
-use danog\MadelineProto\TL\Conversion\MarkdownEntities;
+use danog\MadelineProto\TextEntities;
 use danog\MadelineProto\Tools;
 use PHPUnit\Framework\TestCase;
 
@@ -31,29 +49,51 @@ class EntitiesTest extends TestCase
         $this->assertEquals(['a👍', 'a👍'], StrTools::mbStrSplit('a👍a👍', 3));
         $this->assertEquals(['🇺🇦', '🇺🇦'], StrTools::mbStrSplit('🇺🇦🇺🇦', 4));
     }
-    private static function sendMessage(string $message, string $parse_mode): DOMEntities|MarkdownEntities
+    /**
+     * @dataProvider provideEntityObjects
+     */
+    public function testAllEntities(MessageEntity $message): void
+    {
+        $this->assertTrue(MessageEntity::fromRawEntity($message->toBotAPI()) == $message);
+        $this->assertTrue(MessageEntity::fromRawEntity($message->toMTProto()) == $message);
+    }
+    public static function provideEntityObjects(): array
+    {
+        return [
+            [new BankCard(1, 2)],
+            [new Blockquote(1, 2)],
+            [new Bold(1, 2)],
+            [new BotCommand(1, 2)],
+            [new Cashtag(1, 2)],
+            [new Code(1, 2)],
+            [new CustomEmoji(1, 2, 12345)],
+            [new Email(1, 2)],
+            [new Hashtag(1, 2)],
+            [new Italic(1, 2)],
+            [new MentionName(1, 2, 12345)],
+            [new Mention(1, 2)],
+            [new Phone(1, 2)],
+            [new Pre(1, 2, "language")],
+            [new Spoiler(1, 2)],
+            [new Strike(1, 2)],
+            [new TextUrl(1, 2, "https://google.com")],
+            [new Underline(1, 2)],
+            [new Url(1, 2)],
+        ];
+    }
+    private static function sendMessage(string $message, string $parse_mode): TextEntities
     {
         return match ($parse_mode) {
-            'html' => (new DOMEntities($message)),
-            'markdown' => (new MarkdownEntities($message)),
+            'html' => TextEntities::fromHtml($message),
+            'markdown' => TextEntities::fromMarkdown($message),
         };
     }
-    private static function MTProtoToBotAPI(DOMEntities|MarkdownEntities $entities): array
+    private static function MTProtoToBotAPI(TextEntities $entities): array
     {
         $result = ['text' => $entities->message];
         $entities = $entities->entities;
         foreach ($entities as &$entity) {
-            switch ($entity['_']) {
-                case 'messageEntityMentionName':
-                case 'inputMessageEntityMentionName':
-                    unset($entity['_']);
-                    $entity['type'] = 'text_mention';
-                    $entity['user'] = $entity['user_id'];
-                    unset($entity['user_id']);
-                    break;
-                default:
-                    $entity = MTProto::MTProtoEntityToBotAPI($entity);
-            }
+            $entity = $entity->toBotAPI();
         }
         $result['entities'] = $entities;
         return $result;
@@ -89,7 +129,7 @@ class EntitiesTest extends TestCase
             $resultMTProto = self::sendMessage(message: "```\n".Tools::markdownCodeblockEscape($html)."\n```", parse_mode: $mode);
             $result = self::MTProtoToBotAPI($resultMTProto);
             $this->assertEquals($html, rtrim($result['text']));
-            $this->assertEquals([['offset' => 0, 'length' => StrTools::mbStrlen($html), 'language' => '', 'type' => 'pre']], $result['entities']);
+            $this->assertEquals([['offset' => 0, 'length' => StrTools::mbStrlen($html), 'type' => 'pre']], $result['entities']);
         }
     }
 
@@ -157,7 +197,7 @@ class EntitiesTest extends TestCase
             [
                 'html',
                 'test<b>test </b>',
-                'testtest ',
+                'testtest',
                 [
                     [
                         'offset' => 4,
@@ -165,6 +205,7 @@ class EntitiesTest extends TestCase
                         'type' => 'bold',
                     ],
                 ],
+                'test<b>test</b>',
             ],
             [
                 'html',
@@ -232,7 +273,7 @@ class EntitiesTest extends TestCase
                         'offset' => 20,
                         'length' => 4,
                         'url' => 'https://example.com/',
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                     ],
                     [
                         'offset' => 25,
@@ -295,7 +336,7 @@ class EntitiesTest extends TestCase
             [
                 'markdown',
                 "a\n```php\n<?php\necho 'yay';\n```",
-                "a\n<?php\necho 'yay';\n",
+                "a\n<?php\necho 'yay';",
                 [
                     [
                         'offset' => 2,
@@ -327,13 +368,13 @@ class EntitiesTest extends TestCase
                         'offset' => 0,
                         'length' => 8,
                         'type' => 'text_mention',
-                        'user' => 101374607,
+                        'user' => ['id' => 101374607],
                     ],
                     [
                         'offset' => 9,
                         'length' => 8,
                         'type' => 'text_mention',
-                        'user' => 101374607,
+                        'user' => ['id' => 101374607],
                     ],
                 ],
             ],
@@ -364,7 +405,6 @@ class EntitiesTest extends TestCase
                         'offset' => 0,
                         'length' => 9,
                         'type' => 'pre',
-                        'language' => '',
                     ],
                 ],
             ],
@@ -388,7 +428,7 @@ class EntitiesTest extends TestCase
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
@@ -401,7 +441,7 @@ class EntitiesTest extends TestCase
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://transfer.sh/(/test/test.PNG,/test/test.MP4).zip',
                     ],
                 ],
@@ -414,7 +454,7 @@ class EntitiesTest extends TestCase
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
@@ -427,7 +467,7 @@ class EntitiesTest extends TestCase
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/?v=\\test',
                     ],
                 ],
@@ -435,12 +475,12 @@ class EntitiesTest extends TestCase
             [
                 'markdown',
                 '[link ](https://google.com/)',
-                'link ',
+                'link',
                 [
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
@@ -448,12 +488,12 @@ class EntitiesTest extends TestCase
             [
                 'markdown',
                 '![link ](https://google.com/)',
-                'link ',
+                'link',
                 [
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
@@ -472,7 +512,7 @@ class EntitiesTest extends TestCase
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
@@ -481,16 +521,16 @@ class EntitiesTest extends TestCase
             [
                 'html',
                 '<a href="https://google.com/">link </a>',
-                'link ',
+                'link',
                 [
                     [
                         'offset' => 0,
                         'length' => 4,
-                        'type' => 'text_url',
+                        'type' => 'text_link',
                         'url' => 'https://google.com/',
                     ],
                 ],
-                '<a href="https://google.com/">link</a> ',
+                '<a href="https://google.com/">link</a>',
             ],
             [
                 'markdown',
