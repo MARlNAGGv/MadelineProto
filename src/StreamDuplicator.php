@@ -28,6 +28,7 @@ use Closure;
 use IteratorAggregate;
 
 use function Amp\async;
+use function Amp\Future\await;
 
 /**
  * Stream duplicator.
@@ -61,10 +62,14 @@ final class StreamDuplicator implements ReadableStream, IteratorAggregate
                 $s->close();
             }
         } else {
+            $futures = [];
             foreach ($this->outputs as $s) {
                 if (!$s->isClosed()) {
-                    async($s->write(...), $res)->ignore();
+                    $futures[] = async($s->write(...), $res)->ignore();
                 }
+            }
+            if ($futures) {
+                await($futures, $cancellation);
             }
         }
         return $res;
